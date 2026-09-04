@@ -613,38 +613,6 @@ class _DashboardScreenState extends State<DashboardScreen> with TickerProviderSt
                         ],
                       ),
                       const SizedBox(height: 70),
-                      const _SectionHead(tagKey: 'mission_tag', titleKey: 'mission_title'),
-                      const SizedBox(height: 18),
-                      _ScrollReveal(
-                        index: 0,
-                        child: _MissionCard(
-                          iconPainter: const _SustainabilityIconPainter(),
-                          glow: AppColors.green,
-                          titleKey: 'mission1_title',
-                          bodyKey: 'mission1_body',
-                        ),
-                      ),
-                      const SizedBox(height: 18),
-                      _ScrollReveal(
-                        index: 1,
-                        child: _MissionCard(
-                          iconPainter: const _HealthIconPainter(),
-                          glow: AppColors.cyan,
-                          titleKey: 'mission2_title',
-                          bodyKey: 'mission2_body',
-                        ),
-                      ),
-                      const SizedBox(height: 18),
-                      _ScrollReveal(
-                        index: 2,
-                        child: _MissionCard(
-                          iconPainter: const _EconomicsIconPainter(),
-                          glow: AppColors.yellow,
-                          titleKey: 'mission3_title',
-                          bodyKey: 'mission3_body',
-                        ),
-                      ),
-                      const SizedBox(height: 70),
                       const _SectionHead(tagKey: 'about_tag', titleKey: 'about_title'),
                       const SizedBox(height: 18),
                       const _ScrollReveal(index: 0, child: _AboutBox()),
@@ -1720,8 +1688,39 @@ class _AboutUsScreenBody extends StatelessWidget {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const _SectionHead(
-                            tagKey: 'about_tag', titleKey: 'about_title'),
+                        const _SectionHead(tagKey: 'mission_tag', titleKey: 'mission_title'),
+                        const SizedBox(height: 18),
+                        _ScrollReveal(
+                          index: 0,
+                          child: _MissionCard(
+                            iconPainter: const _SustainabilityIconPainter(),
+                            glow: AppColors.green,
+                            titleKey: 'mission1_title',
+                            bodyKey: 'mission1_body',
+                          ),
+                        ),
+                        const SizedBox(height: 18),
+                        _ScrollReveal(
+                          index: 1,
+                          child: _MissionCard(
+                            iconPainter: const _HealthIconPainter(),
+                            glow: AppColors.cyan,
+                            titleKey: 'mission2_title',
+                            bodyKey: 'mission2_body',
+                          ),
+                        ),
+                        const SizedBox(height: 18),
+                        _ScrollReveal(
+                          index: 2,
+                          child: _MissionCard(
+                            iconPainter: const _EconomicsIconPainter(),
+                            glow: AppColors.yellow,
+                            titleKey: 'mission3_title',
+                            bodyKey: 'mission3_body',
+                          ),
+                        ),
+                        const SizedBox(height: 30),
+                        const _SectionHead(tagKey: 'about_tag', titleKey: 'about_title'),
                         const SizedBox(height: 18),
                         const _AboutBox(),
                         const SizedBox(height: 30),
