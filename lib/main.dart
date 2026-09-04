@@ -44,6 +44,9 @@ class AppColors {
   static const Color yellow = Color(0xFFFFD23F);
   static const Color glass = Color(0x0FFFFFFF);
   static const Color glassBorder = Color(0x1FFFFFFF);
+  static const Color neumoFace  = Color(0xFF0A2E20); // card face — slightly lighter than forestDeep
+  static const Color neumoLight = Color(0xFF1A5C3A); // light shadow (top-left highlight)
+  static const Color neumoDark  = Color(0xFF020F0A); // dark shadow (bottom-right depth)
   static const Color textBody = Color(0xFFCDEBD8);
   static const Color textMuted = Color(0xFFA9D9C2);
   static const Color textFooter = Color(0xFF6F9C85);
@@ -536,17 +539,15 @@ class _DashboardScreenState extends State<DashboardScreen> with TickerProviderSt
         body: Stack(
           children: [
             // â”€â”€ layered background â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-            _SceneBackground(speedNotifier: _scrollSpeedNotifier),
+            _SceneBackground(speedNotifier: _staticSpeed),
 
             CustomScrollView(
               controller: _scrollCtrl,
               slivers: [
                 SliverPadding(
-                  padding: const EdgeInsets.fromLTRB(22, 22, 22, 0),
+                  padding: EdgeInsets.fromLTRB(22, MediaQuery.of(context).padding.top + 90, 22, 0),
                   sliver: SliverList(
                     delegate: SliverChildListDelegate([
-                      const _SectionHead(tagKey: 'features_tag', titleKey: 'features_title'),
-                      const SizedBox(height: 18),
                       GridView.count(
                         crossAxisCount: 2,
                         shrinkWrap: true,
@@ -612,17 +613,7 @@ class _DashboardScreenState extends State<DashboardScreen> with TickerProviderSt
                           ),
                         ],
                       ),
-                      const SizedBox(height: 70),
-                      const _SectionHead(tagKey: 'about_tag', titleKey: 'about_title'),
-                      const SizedBox(height: 18),
-                      const _ScrollReveal(index: 0, child: _AboutBox()),
-                      const SizedBox(height: 30),
-                      Center(
-                        child: _TranslatedText(
-                          'footer',
-                          style: (t) => bodyFont(size: 12, color: AppColors.textFooter),
-                        ),
-                      ),
+
                       const SizedBox(height: 50),
                     ]),
                   ),
@@ -1572,59 +1563,74 @@ class _FeaturesScreenBody extends StatelessWidget {
                 Expanded(
                   child: SingleChildScrollView(
                     padding: const EdgeInsets.fromLTRB(22, 0, 22, 30),
-                    child: GridView.count(
-                      crossAxisCount: 2,
-                      shrinkWrap: true,
-                      physics: const NeverScrollableScrollPhysics(),
-                      mainAxisSpacing: 14,
-                      crossAxisSpacing: 14,
-                      childAspectRatio: 0.75,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        _FeatureCard(
-                          icon: Icons.map_outlined,
-                          color: AppColors.cyan,
-                          titleKey: 'feature1_title',
-                          bodyKey: 'feature1_body',
-                          previewChild: const _MapPreview(),
-                          onTap: (ctx) => Navigator.push(ctx,
-                              MaterialPageRoute(builder: (_) => const MapScreen())),
+                        const _SectionHead(tagKey: 'features_tag', titleKey: 'features_title'),
+                        const SizedBox(height: 18),
+                        GridView.count(
+                          crossAxisCount: 2,
+                          shrinkWrap: true,
+                          physics: const NeverScrollableScrollPhysics(),
+                          mainAxisSpacing: 14,
+                          crossAxisSpacing: 14,
+                          childAspectRatio: 0.75,
+                          children: [
+                            _FeatureCard(
+                              icon: Icons.map_outlined,
+                              color: AppColors.cyan,
+                              titleKey: 'feature1_title',
+                              bodyKey: 'feature1_body',
+                              previewChild: const _MapPreview(),
+                              onTap: (ctx) => Navigator.push(ctx,
+                                  MaterialPageRoute(builder: (_) => const MapScreen())),
+                            ),
+                            _FeatureCard(
+                              icon: Icons.cloud_queue,
+                              color: AppColors.orange,
+                              titleKey: 'feature2_title',
+                              bodyKey: 'feature2_body',
+                              previewChild: const _WeatherPreview(),
+                              onTap: (ctx) => Navigator.push(ctx,
+                                  MaterialPageRoute(builder: (_) => const WeatherScreen())),
+                            ),
+                            _FeatureCard(
+                              icon: Icons.science_outlined,
+                              color: AppColors.yellow,
+                              titleKey: 'feature3_title',
+                              bodyKey: 'feature3_body',
+                              previewChild: const _CalcPreview(),
+                              onTap: (ctx) => Navigator.push(ctx,
+                                  MaterialPageRoute(builder: (_) => const CalculatorScreen())),
+                            ),
+                            _FeatureCard(
+                              icon: Icons.summarize_outlined,
+                              color: AppColors.green,
+                              titleKey: 'feature4_title',
+                              bodyKey: 'feature4_body',
+                              previewChild: const _ReportPreview(),
+                              onTap: (ctx) => Navigator.push(ctx,
+                                  MaterialPageRoute(builder: (_) => const SprayReportScreen())),
+                            ),
+                            _FeatureCard(
+                              icon: Icons.handshake_outlined,
+                              color: AppColors.cyan,
+                              titleKey: 'feature5_title',
+                              bodyKey: 'feature5_body',
+                              previewChild: const _NetworkingPreview(),
+                              onTap: (ctx) => Navigator.push(ctx,
+                                  MaterialPageRoute(builder: (_) => const NetworkingScreen())),
+                            ),
+                          ],
                         ),
-                        _FeatureCard(
-                          icon: Icons.cloud_queue,
-                          color: AppColors.orange,
-                          titleKey: 'feature2_title',
-                          bodyKey: 'feature2_body',
-                          previewChild: const _WeatherPreview(),
-                          onTap: (ctx) => Navigator.push(ctx,
-                              MaterialPageRoute(builder: (_) => const WeatherScreen())),
+                        const SizedBox(height: 30),
+                        Center(
+                          child: _TranslatedText(
+                            'footer',
+                            style: (t) => bodyFont(size: 12, color: AppColors.textFooter),
+                          ),
                         ),
-                        _FeatureCard(
-                          icon: Icons.science_outlined,
-                          color: AppColors.yellow,
-                          titleKey: 'feature3_title',
-                          bodyKey: 'feature3_body',
-                          previewChild: const _CalcPreview(),
-                          onTap: (ctx) => Navigator.push(ctx,
-                              MaterialPageRoute(builder: (_) => const CalculatorScreen())),
-                        ),
-                        _FeatureCard(
-                          icon: Icons.summarize_outlined,
-                          color: AppColors.green,
-                          titleKey: 'feature4_title',
-                          bodyKey: 'feature4_body',
-                          previewChild: const _ReportPreview(),
-                          onTap: (ctx) => Navigator.push(ctx,
-                              MaterialPageRoute(builder: (_) => const SprayReportScreen())),
-                        ),
-                        _FeatureCard(
-                          icon: Icons.handshake_outlined,
-                          color: AppColors.cyan,
-                          titleKey: 'feature5_title',
-                          bodyKey: 'feature5_body',
-                          previewChild: const _NetworkingPreview(),
-                          onTap: (ctx) => Navigator.push(ctx,
-                              MaterialPageRoute(builder: (_) => const NetworkingScreen())),
-                        ),
+                        const SizedBox(height: 50),
                       ],
                     ),
                   ),
@@ -1858,16 +1864,23 @@ class _FarmScenePainter extends CustomPainter {
 
   // â”€â”€ Clouds â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   void _drawClouds(Canvas canvas, double w, double h) {
-    final speed = 0.014 + _sm * 0.20;
+    final speed = 0.055 + _sm * 0.20;
+    // Each cloud has a fixed phase offset (0.0 – 0.75) spread evenly across
+    // the 0→1 cycle so they never all wrap at the same moment.
+    // Position maps 0→1 to (-cloudW) → (w + cloudW) so the cloud is fully
+    // off-screen on both sides before it "teleports" — making the loop
+    // completely invisible and smooth.
     final clouds = [
-      [0.06, 0.10, 0.24, 0.72],
-      [0.44, 0.06, 0.18, 0.58],
-      [0.68, 0.13, 0.22, 0.65],
-      [0.28, 0.18, 0.15, 0.50],
+      // [phaseOffset, yFrac, widthFrac, alpha]
+      [0.00, 0.10, 0.24, 0.72],
+      [0.25, 0.06, 0.18, 0.58],
+      [0.50, 0.13, 0.22, 0.65],
+      [0.75, 0.18, 0.15, 0.50],
     ];
     for (final c in clouds) {
-      final xBase = ((c[0] + t * speed * 3.0) % 1.35) - 0.18;
-      _drawCloud(canvas, xBase * w, c[1] * h, c[2] * w, c[3] / 1.0);
+      final phase = (c[0] + t * speed) % 1.0; // always 0..1, seamless
+      final cx = (phase * (w + c[2] * w * 2)) - c[2] * w; // enters from left edge, exits right
+      _drawCloud(canvas, cx, c[1] * h, c[2] * w, c[3]);
     }
   }
 
@@ -2018,7 +2031,7 @@ class _FarmScenePainter extends CustomPainter {
 
   // â”€â”€ Windmills â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   void _drawWindmills(Canvas canvas, double w, double h) {
-    final baseAngle = t * math.pi * 2 * 1.5;
+    final baseAngle = t * math.pi * 2 * 2.5;
     final extraSpin = _sm * math.pi * 2 * 4;
     final angle     = baseAngle + extraSpin;
 
@@ -2145,8 +2158,7 @@ class _FarmScenePainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _FarmScenePainter old) =>
-      old.t != t || old.scrollSpeed != scrollSpeed;
+  bool shouldRepaint(covariant _FarmScenePainter old) => true;
 
   // ── Helper utilities ───────────────────────────────────
   List<List<double>> _starPositions(double w, double h) {
@@ -2768,87 +2780,101 @@ class _FeatureCardState extends State<_FeatureCard> with SingleTickerProviderSta
         widget.onTap(context);
       },
       onTapCancel: () => setState(() => _pressed = false),
-      child: AnimatedScale(
-        scale: _pressed ? 0.96 : 1.0,
+      child: AnimatedContainer(
         duration: const Duration(milliseconds: 180),
         curve: Curves.easeOut,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 300),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(22),
-            border: Border.all(
-              color: _pressed ? widget.color.withOpacity(0.6) : widget.color.withOpacity(0.22),
-              width: 1.5,
-            ),
-            boxShadow: _pressed
-                ? [BoxShadow(color: widget.color.withOpacity(0.28), blurRadius: 28, spreadRadius: 2)]
-                : [BoxShadow(color: widget.color.withOpacity(0.10), blurRadius: 14)],
-          ),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(21),
-            child: BackdropFilter(
-              filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
-              child: Container(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: [
-                      Colors.white.withOpacity(_pressed ? 0.18 : 0.13),
-                      widget.color.withOpacity(_pressed ? 0.12 : 0.06),
-                    ],
+        clipBehavior: Clip.antiAlias,
+        decoration: BoxDecoration(
+          color: AppColors.neumoFace,
+          borderRadius: BorderRadius.circular(22),
+          boxShadow: _pressed
+              ? [
+                  BoxShadow(
+                    color: AppColors.neumoDark.withOpacity(0.9),
+                    offset: const Offset(4, 4),
+                    blurRadius: 10,
                   ),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
+                  BoxShadow(
+                    color: AppColors.neumoLight.withOpacity(0.25),
+                    offset: const Offset(-2, -2),
+                    blurRadius: 6,
+                  ),
+                ]
+              : [
+                  BoxShadow(
+                    color: AppColors.neumoDark.withOpacity(0.85),
+                    offset: const Offset(6, 6),
+                    blurRadius: 16,
+                  ),
+                  BoxShadow(
+                    color: AppColors.neumoLight.withOpacity(0.35),
+                    offset: const Offset(-5, -5),
+                    blurRadius: 14,
+                  ),
+                ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
                     // â”€â”€ Preview pane â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
                     Expanded(
                       child: Stack(
                         children: [
-                          // Tinted preview background
                           Positioned.fill(
-                            child: Container(
-                              decoration: BoxDecoration(
-                                gradient: LinearGradient(
-                                  begin: Alignment.topCenter,
-                                  end: Alignment.bottomCenter,
-                                  colors: [
-                                    widget.color.withOpacity(0.08),
-                                    Colors.transparent,
-                                  ],
-                                ),
-                              ),
-                            ),
-                          ),
-                          Padding(
-                            padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
-                            child: widget.previewChild,
-                          ),
+                    child: Container(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: [
+                            widget.color.withOpacity(0.07),
+                            Colors.transparent,
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
+                    child: widget.previewChild,
+                  ),
                         ],
                       ),
                     ),
 
                     // â”€â”€ Frosted label strip â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
                     Container(
-                      padding: const EdgeInsets.fromLTRB(14, 10, 14, 14),
-                      decoration: BoxDecoration(
-                        color: Colors.black.withOpacity(0.18),
-                        border: Border(top: BorderSide(color: widget.color.withOpacity(0.15))),
-                      ),
+              padding: const EdgeInsets.fromLTRB(14, 10, 14, 14),
+              decoration: BoxDecoration(
+                color: AppColors.neumoDark.withOpacity(0.5),
+                border: Border(
+                  top: BorderSide(color: widget.color.withOpacity(0.18)),
+                ),
+              ),
                       child: Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           AnimatedBuilder(
                             animation: _pulseAnim,
                             builder: (_, __) => Container(
-                              width: 34,
-                              height: 34,
-                              decoration: BoxDecoration(
-                                color: widget.color.withOpacity(0.15 + _pulseAnim.value * 0.08),
-                                borderRadius: BorderRadius.circular(10),
-                                border: Border.all(color: widget.color.withOpacity(0.4)),
-                              ),
+                      width: 34,
+                      height: 34,
+                      decoration: BoxDecoration(
+                        color: AppColors.neumoFace,
+                        borderRadius: BorderRadius.circular(10),
+                        boxShadow: [
+                          BoxShadow(
+                            color: AppColors.neumoDark.withOpacity(0.7),
+                            offset: const Offset(2, 2),
+                            blurRadius: 4 + _pulseAnim.value * 2,
+                          ),
+                          BoxShadow(
+                            color: AppColors.neumoLight.withOpacity(0.25 + _pulseAnim.value * 0.1),
+                            offset: const Offset(-2, -2),
+                            blurRadius: 4 + _pulseAnim.value * 2,
+                          ),
+                        ],
+                      ),
                               alignment: Alignment.center,
                               child: Icon(widget.icon, size: 16, color: widget.color),
                             ),
@@ -2885,10 +2911,6 @@ class _FeatureCardState extends State<_FeatureCard> with SingleTickerProviderSta
                   ],
                 ),
               ),
-            ),
-          ),
-        ),
-      ),
     );
   }
 }
