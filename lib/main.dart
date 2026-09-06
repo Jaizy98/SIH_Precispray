@@ -2,12 +2,13 @@
 import 'dart:math' as math;
 import 'dart:ui';
 import 'package:flutter/material.dart';
-import 'package:firebase_core/firebase_core.dart';
-import 'package:firebase_auth/firebase_auth.dart';
+// import 'package:firebase_core/firebase_core.dart';
+// import 'package:firebase_auth/firebase_auth.dart';
 import 'package:video_player/video_player.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:visibility_detector/visibility_detector.dart';
-import 'firebase_options.dart';
+// import 'firebase_options.dart';
+import 'database_helper.dart'; // Imports your isolated SQL engine
 import 'screens/weather_screen.dart';
 import 'screens/map_screen.dart';
 import 'screens/calculator_screen.dart';
@@ -16,9 +17,23 @@ import 'screens/networking_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+
+  // SQLite is initialized here, but user-specific data is NOT
+  // loaded yet because nobody has logged in.
+  await LocalDatabaseHelper.instance.database;
+
+  // Start with an empty in-memory profile.
+  ProfileStore().save(
+    name: '',
+    age: '',
+    crops: '',
+    plotNames: [],
+    plotAreas: [],
+  );
+
   runApp(const MyApp());
 }
+
 
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
@@ -44,9 +59,6 @@ class AppColors {
   static const Color yellow = Color(0xFFFFD23F);
   static const Color glass = Color(0x0FFFFFFF);
   static const Color glassBorder = Color(0x1FFFFFFF);
-  static const Color neumoFace  = Color(0xFF0A2E20); // card face — slightly lighter than forestDeep
-  static const Color neumoLight = Color(0xFF1A5C3A); // light shadow (top-left highlight)
-  static const Color neumoDark  = Color(0xFF020F0A); // dark shadow (bottom-right depth)
   static const Color textBody = Color(0xFFCDEBD8);
   static const Color textMuted = Color(0xFFA9D9C2);
   static const Color textFooter = Color(0xFF6F9C85);
@@ -115,9 +127,6 @@ class AppStrings {
       'drawer_field_mapping': 'Field Mapping',
       'drawer_spray_report': 'Spray report',
       'drawer_networking': 'Networking',
-      'drawer_tutorial': 'Tutorial',
-      'drawer_features': 'Features',
-      'drawer_about': 'About Us',
       'drawer_savings_tracker': 'Savings tracker',
       'profile_screen_title': 'Your Profile',
       'profile_field_name': 'Name',
@@ -301,19 +310,25 @@ const Map<String, String> kSupportedLanguages = {
   'mr': 'मराठी',
 };
 
+
 // ============================================================
-// 1. LOGIN PAGE (unchanged)
+// 1. AUTHENTICATION
+//    Separate LOGIN and REGISTER screens
 // ============================================================
+
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
+
   @override
   State<LoginPage> createState() => _LoginPageState();
 }
 
 class _LoginPageState extends State<LoginPage> {
-  final TextEditingController _phoneController    = TextEditingController();
+  final TextEditingController _phoneController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
+
   bool _loading = false;
+  bool _obscurePassword = true;
 
   @override
   void dispose() {
@@ -322,27 +337,104 @@ class _LoginPageState extends State<LoginPage> {
     super.dispose();
   }
 
-  Future<void> _handleAuth(BuildContext context) async {
+  Future<void> _login() async {
+    final phone = _phoneController.text.trim();
+    final password = _passwordController.text.trim();
+
+    if (phone.isEmpty || password.isEmpty) {
+      _showMessage('Please enter phone number and password.');
+      return;
+    }
+
     setState(() => _loading = true);
-    String email    = "${_phoneController.text.trim()}@precispray.com";
-    String password = _passwordController.text.trim();
+
     try {
-      try {
-        await FirebaseAuth.instance.createUserWithEmailAndPassword(email: email, password: password);
-      } catch (_) {
-        await FirebaseAuth.instance.signInWithEmailAndPassword(email: email, password: password);
+      final db = LocalDatabaseHelper.instance;
+    
+      final user = await db.verifyLocalLogin(
+      phone,
+      password,
+    );
+
+    if (!mounted) return;
+
+    if (user != null) {
+      // Get the unique SQLite User ID.
+      final int userId = user['id'] as int;
+
+      // Store it for the current session.
+      UserSession().login(userId);
+
+      // Load THIS user's profile and plots.
+      final savedProfile = await db.getProfile(userId);
+      final savedPlots = await db.getPlots(userId);
+
+      if (savedProfile != null) {
+        ProfileStore().save(
+          name: savedProfile['name']?.toString() ?? '',
+          age: savedProfile['age']?.toString() ?? '',
+          crops: savedProfile['crops']?.toString() ?? '',
+          plotNames: savedPlots
+              .map((p) => p['plot_name']?.toString() ?? '')
+              .toList(),
+          plotAreas: savedPlots
+              .map((p) => p['area']?.toString() ?? '')
+              .toList(),
+        );
+      } else {
+        ProfileStore().save(
+          name: '',
+          age: '',
+          crops: '',
+          plotNames: [],
+          plotAreas: [],
+        );
       }
-      if (!context.mounted) return;
-      Navigator.pushReplacement(context,
-          MaterialPageRoute(builder: (context) => const AnimationScreen()));
+
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (context) => const AnimationScreen(),
+        ),
+      );
+    } else {
+      _showMessage('Invalid phone number or password.');
+    }
     } catch (e) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Login failed: $e')));
+      if (mounted) {
+        _showMessage('Login failed. Please try again.');
       }
     } finally {
-      if (mounted) setState(() => _loading = false);
+      if (mounted) {
+        setState(() => _loading = false);
+      }
     }
+  }
+
+  void _showMessage(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message)),
+    );
+  }
+
+  InputDecoration _inputDecoration(
+    String hint,
+    IconData icon,
+  ) {
+    return InputDecoration(
+      hintText: hint,
+      prefixIcon: Icon(icon),
+      filled: true,
+      fillColor: Colors.white.withOpacity(0.92),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(14),
+        borderSide: BorderSide.none,
+      ),
+      contentPadding: const EdgeInsets.symmetric(
+        horizontal: 16,
+        vertical: 16,
+      ),
+    );
   }
 
   @override
@@ -350,49 +442,527 @@ class _LoginPageState extends State<LoginPage> {
     return Scaffold(
       body: Container(
         decoration: const BoxDecoration(
-          image: DecorationImage(image: AssetImage('assets/login_bg.png'), fit: BoxFit.cover),
+          image: DecorationImage(
+            image: AssetImage('assets/login_bg.png'),
+            fit: BoxFit.cover,
+          ),
         ),
-        child: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Padding(
-                padding: const EdgeInsets.all(20),
-                child: TextField(
-                  controller: _phoneController,
-                  keyboardType: TextInputType.phone,
-                  decoration: const InputDecoration(
-                    hintText: "Contact Number",
-                    filled: true,
-                    fillColor: Colors.white70,
-                  ),
+        child: SafeArea(
+          child: Center(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(24),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(
+                  maxWidth: 430,
                 ),
-              ),
-              Padding(
-                padding: const EdgeInsets.all(20),
-                child: TextField(
-                  controller: _passwordController,
-                  obscureText: true,
-                  decoration: const InputDecoration(
-                    hintText: "Password",
-                    filled: true,
-                    fillColor: Colors.white70,
-                  ),
-                ),
-              ),
-              _loading
-                  ? const CircularProgressIndicator()
-                  : ElevatedButton(
-                      onPressed: () => _handleAuth(context),
-                      child: const Text("Login / Register"),
+                child: Container(
+                  padding: const EdgeInsets.all(28),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withOpacity(0.45),
+                    borderRadius: BorderRadius.circular(28),
+                    border: Border.all(
+                      color: Colors.white.withOpacity(0.15),
                     ),
-            ],
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+
+                      // Logo / Icon
+                      Container(
+                        width: 76,
+                        height: 76,
+                        decoration: BoxDecoration(
+                          color: AppColors.green.withOpacity(0.15),
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                            color: AppColors.green.withOpacity(0.5),
+                          ),
+                        ),
+                        child: const Icon(
+                          Icons.agriculture,
+                          size: 40,
+                          color: AppColors.green,
+                        ),
+                      ),
+
+                      const SizedBox(height: 22),
+
+                      Text(
+                        'Welcome Back',
+                        style: headingFont(
+                          size: 30,
+                          weight: FontWeight.w700,
+                        ),
+                      ),
+
+                      const SizedBox(height: 8),
+
+                      Text(
+                        'Login to continue to PreciseSpray',
+                        textAlign: TextAlign.center,
+                        style: bodyFont(
+                          size: 14,
+                          color: AppColors.textMuted,
+                        ),
+                      ),
+
+                      const SizedBox(height: 28),
+
+                      // PHONE
+                      TextField(
+                        controller: _phoneController,
+                        keyboardType: TextInputType.phone,
+                        decoration: _inputDecoration(
+                          'Contact Number',
+                          Icons.phone_outlined,
+                        ),
+                      ),
+
+                      const SizedBox(height: 14),
+
+                      // PASSWORD
+                      TextField(
+                        controller: _passwordController,
+                        obscureText: _obscurePassword,
+                        decoration: _inputDecoration(
+                          'Password',
+                          Icons.lock_outline,
+                        ).copyWith(
+                          suffixIcon: IconButton(
+                            icon: Icon(
+                              _obscurePassword
+                                  ? Icons.visibility_off_outlined
+                                  : Icons.visibility_outlined,
+                            ),
+                            onPressed: () {
+                              setState(() {
+                                _obscurePassword =
+                                    !_obscurePassword;
+                              });
+                            },
+                          ),
+                        ),
+                      ),
+
+                      const SizedBox(height: 22),
+
+                      // LOGIN BUTTON
+                      SizedBox(
+                        width: double.infinity,
+                        height: 52,
+                        child: ElevatedButton(
+                          onPressed: _loading ? null : _login,
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: AppColors.green,
+                            foregroundColor: AppColors.forestDeep,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                          ),
+                          child: _loading
+                              ? const SizedBox(
+                                  height: 22,
+                                  width: 22,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : const Text(
+                                  'LOGIN',
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 15,
+                                  ),
+                                ),
+                        ),
+                      ),
+
+                      const SizedBox(height: 20),
+
+                      // REGISTER LINK
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Text(
+                            "Don't have an account? ",
+                            style: bodyFont(
+                              size: 13,
+                              color: AppColors.textMuted,
+                            ),
+                          ),
+                          GestureDetector(
+                            onTap: _loading
+                                ? null
+                                : () {
+                                    Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (_) =>
+                                            const RegisterPage(),
+                                      ),
+                                    );
+                                  },
+                            child: Text(
+                              'Register',
+                              style: bodyFont(
+                                size: 13,
+                                weight: FontWeight.w700,
+                                color: AppColors.green,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
           ),
         ),
       ),
     );
   }
 }
+
+
+// ============================================================
+// 2. REGISTER PAGE
+// ============================================================
+
+class RegisterPage extends StatefulWidget {
+  const RegisterPage({super.key});
+
+  @override
+  State<RegisterPage> createState() => _RegisterPageState();
+}
+
+class _RegisterPageState extends State<RegisterPage> {
+  final TextEditingController _phoneController =
+      TextEditingController();
+
+  final TextEditingController _passwordController =
+      TextEditingController();
+
+  final TextEditingController _confirmPasswordController =
+      TextEditingController();
+
+  bool _loading = false;
+  bool _obscurePassword = true;
+  bool _obscureConfirmPassword = true;
+
+  @override
+  void dispose() {
+    _phoneController.dispose();
+    _passwordController.dispose();
+    _confirmPasswordController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _register() async {
+    final phone = _phoneController.text.trim();
+    final password = _passwordController.text.trim();
+    final confirmPassword =
+        _confirmPasswordController.text.trim();
+
+    if (phone.isEmpty ||
+        password.isEmpty ||
+        confirmPassword.isEmpty) {
+      _showMessage('Please fill in all fields.');
+      return;
+    }
+
+    if (phone.length < 10) {
+      _showMessage('Please enter a valid contact number.');
+      return;
+    }
+
+    if (password.length < 4) {
+      _showMessage(
+        'Password must be at least 4 characters.',
+      );
+      return;
+    }
+
+    if (password != confirmPassword) {
+      _showMessage('Passwords do not match.');
+      return;
+    }
+
+    setState(() => _loading = true);
+
+    try {
+      final db = LocalDatabaseHelper.instance;
+
+      final userId = await db.registerLocalUser(
+        phone,
+        password,
+      );
+
+      if (!mounted) return;
+
+      if (userId != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Account created successfully. Please login.',
+            ),
+          ),
+        );
+
+        Navigator.pop(context);
+      } else {
+        _showMessage(
+          'An account with this phone number already exists.',
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        _showMessage(
+          'Registration failed. Please try again.',
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _loading = false);
+      }
+    }
+  }
+
+  void _showMessage(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message)),
+    );
+  }
+
+  InputDecoration _inputDecoration(
+    String hint,
+    IconData icon,
+  ) {
+    return InputDecoration(
+      hintText: hint,
+      prefixIcon: Icon(icon),
+      filled: true,
+      fillColor: Colors.white.withOpacity(0.92),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(14),
+        borderSide: BorderSide.none,
+      ),
+      contentPadding: const EdgeInsets.symmetric(
+        horizontal: 16,
+        vertical: 16,
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Container(
+        decoration: const BoxDecoration(
+          image: DecorationImage(
+            image: AssetImage('assets/login_bg.png'),
+            fit: BoxFit.cover,
+          ),
+        ),
+        child: SafeArea(
+          child: Center(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(24),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(
+                  maxWidth: 430,
+                ),
+                child: Container(
+                  padding: const EdgeInsets.all(28),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withOpacity(0.45),
+                    borderRadius: BorderRadius.circular(28),
+                    border: Border.all(
+                      color: Colors.white.withOpacity(0.15),
+                    ),
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+
+                      // ICON
+                      Container(
+                        width: 76,
+                        height: 76,
+                        decoration: BoxDecoration(
+                          color: AppColors.green.withOpacity(0.15),
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                            color: AppColors.green.withOpacity(0.5),
+                          ),
+                        ),
+                        child: const Icon(
+                          Icons.person_add_alt_1,
+                          size: 38,
+                          color: AppColors.green,
+                        ),
+                      ),
+
+                      const SizedBox(height: 22),
+
+                      Text(
+                        'Create Account',
+                        style: headingFont(
+                          size: 30,
+                          weight: FontWeight.w700,
+                        ),
+                      ),
+
+                      const SizedBox(height: 8),
+
+                      Text(
+                        'Register to start using PreciseSpray',
+                        textAlign: TextAlign.center,
+                        style: bodyFont(
+                          size: 14,
+                          color: AppColors.textMuted,
+                        ),
+                      ),
+
+                      const SizedBox(height: 28),
+
+                      // PHONE
+                      TextField(
+                        controller: _phoneController,
+                        keyboardType: TextInputType.phone,
+                        decoration: _inputDecoration(
+                          'Contact Number',
+                          Icons.phone_outlined,
+                        ),
+                      ),
+
+                      const SizedBox(height: 14),
+
+                      // PASSWORD
+                      TextField(
+                        controller: _passwordController,
+                        obscureText: _obscurePassword,
+                        decoration: _inputDecoration(
+                          'Create Password',
+                          Icons.lock_outline,
+                        ).copyWith(
+                          suffixIcon: IconButton(
+                            icon: Icon(
+                              _obscurePassword
+                                  ? Icons.visibility_off_outlined
+                                  : Icons.visibility_outlined,
+                            ),
+                            onPressed: () {
+                              setState(() {
+                                _obscurePassword =
+                                    !_obscurePassword;
+                              });
+                            },
+                          ),
+                        ),
+                      ),
+
+                      const SizedBox(height: 14),
+
+                      // CONFIRM PASSWORD
+                      TextField(
+                        controller: _confirmPasswordController,
+                        obscureText: _obscureConfirmPassword,
+                        decoration: _inputDecoration(
+                          'Confirm Password',
+                          Icons.lock_reset_outlined,
+                        ).copyWith(
+                          suffixIcon: IconButton(
+                            icon: Icon(
+                              _obscureConfirmPassword
+                                  ? Icons.visibility_off_outlined
+                                  : Icons.visibility_outlined,
+                            ),
+                            onPressed: () {
+                              setState(() {
+                                _obscureConfirmPassword =
+                                    !_obscureConfirmPassword;
+                              });
+                            },
+                          ),
+                        ),
+                      ),
+
+                      const SizedBox(height: 22),
+
+                      // REGISTER BUTTON
+                      SizedBox(
+                        width: double.infinity,
+                        height: 52,
+                        child: ElevatedButton(
+                          onPressed: _loading ? null : _register,
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: AppColors.green,
+                            foregroundColor: AppColors.forestDeep,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                          ),
+                          child: _loading
+                              ? const SizedBox(
+                                  height: 22,
+                                  width: 22,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : const Text(
+                                  'CREATE ACCOUNT',
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 15,
+                                  ),
+                                ),
+                        ),
+                      ),
+
+                      const SizedBox(height: 20),
+
+                      // BACK TO LOGIN
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Text(
+                            'Already have an account? ',
+                            style: bodyFont(
+                              size: 13,
+                              color: AppColors.textMuted,
+                            ),
+                          ),
+                          GestureDetector(
+                            onTap: _loading
+                                ? null
+                                : () => Navigator.pop(context),
+                            child: Text(
+                              'Login',
+                              style: bodyFont(
+                                size: 13,
+                                weight: FontWeight.w700,
+                                color: AppColors.green,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 
 // ============================================================
 // 2. ANIMATION / TRANSITION SCREEN (unchanged)
@@ -539,15 +1109,18 @@ class _DashboardScreenState extends State<DashboardScreen> with TickerProviderSt
         body: Stack(
           children: [
             // â”€â”€ layered background â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-            _SceneBackground(speedNotifier: _staticSpeed),
+            _SceneBackground(speedNotifier: _scrollSpeedNotifier),
 
             CustomScrollView(
               controller: _scrollCtrl,
               slivers: [
+                SliverToBoxAdapter(child: _HeroSlider()),
                 SliverPadding(
-                  padding: EdgeInsets.fromLTRB(22, MediaQuery.of(context).padding.top + 90, 22, 0),
+                  padding: const EdgeInsets.fromLTRB(22, 60, 22, 0),
                   sliver: SliverList(
                     delegate: SliverChildListDelegate([
+                      const _SectionHead(tagKey: 'features_tag', titleKey: 'features_title'),
+                      const SizedBox(height: 18),
                       GridView.count(
                         crossAxisCount: 2,
                         shrinkWrap: true,
@@ -613,7 +1186,49 @@ class _DashboardScreenState extends State<DashboardScreen> with TickerProviderSt
                           ),
                         ],
                       ),
-
+                      const SizedBox(height: 70),
+                      const _SectionHead(tagKey: 'mission_tag', titleKey: 'mission_title'),
+                      const SizedBox(height: 18),
+                      _ScrollReveal(
+                        index: 0,
+                        child: _MissionCard(
+                          iconPainter: const _SustainabilityIconPainter(),
+                          glow: AppColors.green,
+                          titleKey: 'mission1_title',
+                          bodyKey: 'mission1_body',
+                        ),
+                      ),
+                      const SizedBox(height: 18),
+                      _ScrollReveal(
+                        index: 1,
+                        child: _MissionCard(
+                          iconPainter: const _HealthIconPainter(),
+                          glow: AppColors.cyan,
+                          titleKey: 'mission2_title',
+                          bodyKey: 'mission2_body',
+                        ),
+                      ),
+                      const SizedBox(height: 18),
+                      _ScrollReveal(
+                        index: 2,
+                        child: _MissionCard(
+                          iconPainter: const _EconomicsIconPainter(),
+                          glow: AppColors.yellow,
+                          titleKey: 'mission3_title',
+                          bodyKey: 'mission3_body',
+                        ),
+                      ),
+                      const SizedBox(height: 70),
+                      const _SectionHead(tagKey: 'about_tag', titleKey: 'about_title'),
+                      const SizedBox(height: 18),
+                      const _ScrollReveal(index: 0, child: _AboutBox()),
+                      const SizedBox(height: 30),
+                      Center(
+                        child: _TranslatedText(
+                          'footer',
+                          style: (t) => bodyFont(size: 12, color: AppColors.textFooter),
+                        ),
+                      ),
                       const SizedBox(height: 50),
                     ]),
                   ),
@@ -917,14 +1532,20 @@ class _SideDrawerState extends State<_SideDrawer> with SingleTickerProviderState
                     _DrawerFeature(icon: Icons.person, color: AppColors.green, labelKey: 'drawer_profile',
                       onTap: () { widget.onClose(); Navigator.push(context, MaterialPageRoute(builder: (_) => const ProfileScreen())); }),
                     const SizedBox(height: 14),
-                    _DrawerFeature(icon: Icons.play_circle_outline, color: AppColors.cyan, labelKey: 'drawer_tutorial',
-                      onTap: () { widget.onClose(); ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Tutorial — coming soon!'))); }),
+                    _DrawerFeature(icon: Icons.science_outlined, color: AppColors.cyan, labelKey: 'drawer_chem_calc',
+                      onTap: () { widget.onClose(); Navigator.push(context, MaterialPageRoute(builder: (_) => const CalculatorScreen())); }),
                     const SizedBox(height: 14),
-                    _DrawerFeature(icon: Icons.grid_view_rounded, color: AppColors.orange, labelKey: 'drawer_features',
-                      onTap: () { widget.onClose(); Navigator.push(context, MaterialPageRoute(builder: (_) => const FeaturesScreen())); }),
+                    _DrawerFeature(icon: Icons.wb_sunny_outlined, color: AppColors.yellow, labelKey: 'drawer_fav_weather',
+                      onTap: () { widget.onClose(); Navigator.push(context, MaterialPageRoute(builder: (_) => const WeatherScreen())); }),
                     const SizedBox(height: 14),
-                    _DrawerFeature(icon: Icons.info_outline, color: AppColors.yellow, labelKey: 'drawer_about',
-                      onTap: () { widget.onClose(); Navigator.push(context, MaterialPageRoute(builder: (_) => const AboutUsScreen())); }),
+                    _DrawerFeature(icon: Icons.map_outlined, color: AppColors.orange, labelKey: 'drawer_field_mapping',
+                      onTap: () { widget.onClose(); Navigator.push(context, MaterialPageRoute(builder: (_) => const MapScreen())); }),
+                    const SizedBox(height: 14),
+                    _DrawerFeature(icon: Icons.summarize_outlined, color: AppColors.green, labelKey: 'drawer_spray_report',
+                      onTap: () { widget.onClose(); Navigator.push(context, MaterialPageRoute(builder: (_) => const SprayReportScreen())); }),
+                    const SizedBox(height: 14),
+                    _DrawerFeature(icon: Icons.handshake_outlined, color: AppColors.cyan, labelKey: 'drawer_networking',
+                      onTap: () { widget.onClose(); Navigator.push(context, MaterialPageRoute(builder: (_) => const NetworkingScreen())); }),
 
                     const Spacer(),
 
@@ -1144,7 +1765,30 @@ class _DrawerAgriPainter extends CustomPainter {
 
   @override bool shouldRepaint(covariant _DrawerAgriPainter o) => o.t != t;
 }
+// ============================================================
+// CURRENT USER SESSION
+// ============================================================
+// Stores the unique SQLite user ID of the currently logged-in user.
 
+class UserSession {
+  static final UserSession _instance = UserSession._internal();
+
+  factory UserSession() => _instance;
+
+  UserSession._internal();
+
+  int? userId;
+
+  bool get isLoggedIn => userId != null;
+
+  void login(int id) {
+    userId = id;
+  }
+
+  void logout() {
+    userId = null;
+  }
+}
 // ============================================================
 // PROFILE SCREEN â€” reached from the drawer's "Profile" button.
 // Background kept consistent with the dashboard (same gradient
@@ -1254,7 +1898,73 @@ class _ProfileScreenState extends State<ProfileScreen> {
       const SnackBar(content: Text('Profile saved!')),
     );
     Navigator.pop(context);
+  } **/
+
+void _handleSubmit() async {
+  if (_nameController.text.trim().isEmpty) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Please enter your name.')),
+    );
+    return;
   }
+
+  final name = _nameController.text;
+  final age = _ageController.text;
+  final crops = _cropsController.text;
+
+  // 💾 Pipe inputs directly into your new offline-first handler
+  final db = LocalDatabaseHelper.instance;
+
+  final userId = UserSession().userId;
+
+  if (userId == null) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Session expired. Please login again.'),
+      ),
+    );
+    return;
+  }
+
+  await db.saveProfile(
+    userId,
+    name,
+    age,
+    crops,
+  );
+
+  await db.clearAllPlots(userId);
+
+  for (final plot in _plots) {
+    final plotName = plot.nameController.text.trim();
+    final plotArea = plot.areaController.text.trim();
+
+    if (plotArea.isNotEmpty) {
+      await db.savePlot(
+        userId,
+        plotName,
+        plotArea,
+      );
+    }
+  }
+
+  // Update in-memory storage context exactly like before
+  ProfileStore().save(
+    name: name,
+    age: age,
+    crops: crops,
+    plotNames: _plots.map((p) => p.nameController.text).toList(),
+    plotAreas: _plots.map((p) => p.areaController.text).toList(),
+  );
+
+  if (mounted) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Profile locked inside local offline storage!')),
+    );
+    Navigator.pop(context);
+  }
+}
+
 
   @override
   void dispose() {
@@ -1519,222 +2229,203 @@ class _PlotTab extends StatelessWidget {
   }
 }
 
-// ============================================================
-// FEATURES SCREEN
-// ============================================================
-class FeaturesScreen extends StatelessWidget {
-  const FeaturesScreen({super.key});
-
+// ----------------------------------------------------------
+// Hero slider â€” farm1-4.jpg, auto-advance + manual swipe,
+// continuous scale/opacity driven by live page position.
+// BoxFit.contain so the full photo is always visible.
+// ----------------------------------------------------------
+class _HeroSlider extends StatefulWidget {
   @override
-  Widget build(BuildContext context) {
-    return LanguageScope(
-      controller: LanguageController(),
-      child: _FeaturesScreenBody(),
-    );
-  }
+  State<_HeroSlider> createState() => _HeroSliderState();
 }
 
-class _FeaturesScreenBody extends StatelessWidget {
+class _HeroSliderState extends State<_HeroSlider> with TickerProviderStateMixin {
+  // Drone animation
+  late final AnimationController _droneCtrl;
+  late final Animation<double>   _droneX;
+  late final Animation<double>   _droneY;
+  // Text entrance
+  late final AnimationController _textCtrl;
+  late final Animation<double>   _textFade;
+  late final Animation<double>   _textSlide;
+
+  // page dots
+  final PageController _pageController = PageController();
+  int _index = 0;
+  Timer? _timer;
+
+  static const List<String> _images = [
+    'assets/farm1.jpg', 'assets/farm2.jpg',
+    'assets/farm3.jpg', 'assets/farm4.jpg',
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+
+    // drone flies rightâ†’left every 8 s, bob up/down sinusoidally
+    _droneCtrl = AnimationController(vsync: this, duration: const Duration(seconds: 8))
+      ..repeat();
+    _droneX = Tween<double>(begin: 1.15, end: -0.15)
+        .animate(CurvedAnimation(parent: _droneCtrl, curve: Curves.linear));
+    _droneY = TweenSequence([
+      TweenSequenceItem(tween: Tween(begin: 0.28, end: 0.22), weight: 1),
+      TweenSequenceItem(tween: Tween(begin: 0.22, end: 0.28), weight: 1),
+    ]).animate(CurvedAnimation(parent: _droneCtrl, curve: Curves.easeInOut));
+
+    // text entrance on load
+    _textCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 1200));
+    _textFade  = CurvedAnimation(parent: _textCtrl, curve: const Interval(0.0, 0.7, curve: Curves.easeOut));
+    _textSlide = Tween<double>(begin: 40, end: 0)
+        .animate(CurvedAnimation(parent: _textCtrl, curve: const Interval(0.0, 0.8, curve: Curves.easeOutCubic)));
+
+    Future.delayed(const Duration(milliseconds: 400), () {
+      if (mounted) _textCtrl.forward();
+    });
+
+    _timer = Timer.periodic(const Duration(milliseconds: 4200), (_) {
+      if (!mounted) return;
+      final next = (_index + 1) % _images.length;
+      _pageController.animateToPage(next,
+          duration: const Duration(milliseconds: 1100), curve: const Cubic(0.16, 1, 0.3, 1));
+    });
+  }
+
+  @override
+  void dispose() {
+    _droneCtrl.dispose();
+    _textCtrl.dispose();
+    _timer?.cancel();
+    _pageController.dispose();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: AppColors.forestDeep,
-      body: Stack(
+    final lang    = LanguageScope.of(context);
+    final screenH = MediaQuery.of(context).size.height;
+
+    return SizedBox(
+      height: screenH,
+      child: Stack(
         children: [
-          _SceneBackground(speedNotifier: _staticSpeed),
-          SafeArea(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(8, 12, 22, 0),
-                  child: Row(
-                    children: [
-                      IconButton(
-                        icon: const Icon(Icons.arrow_back, color: Colors.white),
-                        onPressed: () => Navigator.pop(context),
-                      ),
-                      Text('Features',
-                          style: headingFont(size: 22, color: Colors.white)),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 12),
-                Expanded(
-                  child: SingleChildScrollView(
-                    padding: const EdgeInsets.fromLTRB(22, 0, 22, 30),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const _SectionHead(tagKey: 'features_tag', titleKey: 'features_title'),
-                        const SizedBox(height: 18),
-                        GridView.count(
-                          crossAxisCount: 2,
-                          shrinkWrap: true,
-                          physics: const NeverScrollableScrollPhysics(),
-                          mainAxisSpacing: 14,
-                          crossAxisSpacing: 14,
-                          childAspectRatio: 0.75,
-                          children: [
-                            _FeatureCard(
-                              icon: Icons.map_outlined,
-                              color: AppColors.cyan,
-                              titleKey: 'feature1_title',
-                              bodyKey: 'feature1_body',
-                              previewChild: const _MapPreview(),
-                              onTap: (ctx) => Navigator.push(ctx,
-                                  MaterialPageRoute(builder: (_) => const MapScreen())),
-                            ),
-                            _FeatureCard(
-                              icon: Icons.cloud_queue,
-                              color: AppColors.orange,
-                              titleKey: 'feature2_title',
-                              bodyKey: 'feature2_body',
-                              previewChild: const _WeatherPreview(),
-                              onTap: (ctx) => Navigator.push(ctx,
-                                  MaterialPageRoute(builder: (_) => const WeatherScreen())),
-                            ),
-                            _FeatureCard(
-                              icon: Icons.science_outlined,
-                              color: AppColors.yellow,
-                              titleKey: 'feature3_title',
-                              bodyKey: 'feature3_body',
-                              previewChild: const _CalcPreview(),
-                              onTap: (ctx) => Navigator.push(ctx,
-                                  MaterialPageRoute(builder: (_) => const CalculatorScreen())),
-                            ),
-                            _FeatureCard(
-                              icon: Icons.summarize_outlined,
-                              color: AppColors.green,
-                              titleKey: 'feature4_title',
-                              bodyKey: 'feature4_body',
-                              previewChild: const _ReportPreview(),
-                              onTap: (ctx) => Navigator.push(ctx,
-                                  MaterialPageRoute(builder: (_) => const SprayReportScreen())),
-                            ),
-                            _FeatureCard(
-                              icon: Icons.handshake_outlined,
-                              color: AppColors.cyan,
-                              titleKey: 'feature5_title',
-                              bodyKey: 'feature5_body',
-                              previewChild: const _NetworkingPreview(),
-                              onTap: (ctx) => Navigator.push(ctx,
-                                  MaterialPageRoute(builder: (_) => const NetworkingScreen())),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 30),
-                        Center(
-                          child: _TranslatedText(
-                            'footer',
-                            style: (t) => bodyFont(size: 12, color: AppColors.textFooter),
-                          ),
-                        ),
-                        const SizedBox(height: 50),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
+          // â”€â”€ Background â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+          Container(
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [Color(0xFF103D2C), Color(0xFF06241A)],
+              ),
             ),
           ),
-        ],
-      ),
-    );
-  }
-}
 
-// Shared static speed notifier for screens that don't scroll
-final ValueNotifier<double> _staticSpeed = ValueNotifier(0.0);
+          // â”€â”€ Photos â€” BoxFit.contain, full screen height â”€â”€
+          // Exactly the original: photo centered in full screen,
+          // dimensions don't matter â€” entire image always visible.
+          PageView.builder(
+            controller: _pageController,
+            itemCount: _images.length,
+            onPageChanged: (i) => setState(() => _index = i),
+            itemBuilder: (_, i) => AnimatedBuilder(
+              animation: _pageController,
+              builder: (_, __) {
+                double scale   = 1.0;
+                double opacity = 1.0;
+                if (_pageController.position.haveDimensions) {
+                  final page  = _pageController.page ?? _index.toDouble();
+                  final delta = (page - i);
+                  scale   = 1.0 - (delta.abs().clamp(0.0, 1.0) * 0.08);
+                  opacity = 1.0 - (delta.abs().clamp(0.0, 1.0) * 0.55);
+                }
+                return Opacity(
+                  opacity: opacity,
+                  child: Transform.scale(
+                    scale: scale,
+                    child: Image.asset(
+                      _images[i],
+                      fit: BoxFit.contain,
+                      width: double.infinity,
+                      height: double.infinity,
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
 
-// ============================================================
-// ABOUT US SCREEN
-// ============================================================
-class AboutUsScreen extends StatelessWidget {
-  const AboutUsScreen({super.key});
+          // â”€â”€ Bottom gradient fade â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+          Positioned(
+            left: 0, right: 0, bottom: 0,
+            height: screenH * 0.55,
+            child: IgnorePointer(
+              child: Container(
+                decoration: const BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [Color(0x00072618), Color(0xF2072618)],
+                    stops: [0.0, 0.85],
+                  ),
+                ),
+              ),
+            ),
+          ),
 
-  @override
-  Widget build(BuildContext context) {
-    return LanguageScope(
-      controller: LanguageController(),
-      child: _AboutUsScreenBody(),
-    );
-  }
-}
-
-class _AboutUsScreenBody extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: AppColors.forestDeep,
-      body: Stack(
-        children: [
-          _SceneBackground(speedNotifier: _staticSpeed),
-          SafeArea(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(8, 12, 22, 0),
-                  child: Row(
+          // â”€â”€ Text pinned to bottom â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+          Positioned(
+            left: 24, right: 24, bottom: 40,
+            child: AnimatedBuilder(
+              animation: _textCtrl,
+              builder: (_, __) => Opacity(
+                opacity: _textFade.value,
+                child: Transform.translate(
+                  offset: Offset(0, _textSlide.value),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      IconButton(
-                        icon: const Icon(Icons.arrow_back, color: Colors.white),
-                        onPressed: () => Navigator.pop(context),
+                      Text(lang.t('hero_title'), style: headingFont(size: 36)),
+                      const SizedBox(height: 10),
+                      SizedBox(
+                        width: 320,
+                        child: Text(
+                          lang.t('hero_subtitle'),
+                          style: bodyFont(size: 14, color: AppColors.textBody),
+                        ),
                       ),
-                      Text('About Us',
-                          style: headingFont(size: 22, color: Colors.white)),
+                      const SizedBox(height: 16),
+                      Row(
+                        children: List.generate(_images.length, (i) {
+                          final active = i == _index;
+                          return GestureDetector(
+                            onTap: () => _pageController.animateToPage(i,
+                              duration: const Duration(milliseconds: 500),
+                              curve: Curves.easeOutCubic),
+                            child: AnimatedContainer(
+                              duration: const Duration(milliseconds: 400),
+                              margin: const EdgeInsets.only(right: 8),
+                              width: active ? 26 : 8,
+                              height: 8,
+                              decoration: BoxDecoration(
+                                color: active
+                                    ? AppColors.orange
+                                    : Colors.white.withValues(alpha: 0.25),
+                                borderRadius: BorderRadius.circular(5),
+                                boxShadow: active
+                                    ? [BoxShadow(
+                                        color: AppColors.orange.withValues(alpha: 0.6),
+                                        blurRadius: 10,
+                                      )]
+                                    : [],
+                              ),
+                            ),
+                          );
+                        }),
+                      ),
                     ],
                   ),
                 ),
-                const SizedBox(height: 24),
-                Expanded(
-                  child: SingleChildScrollView(
-                    padding: const EdgeInsets.fromLTRB(22, 0, 22, 30),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const _SectionHead(tagKey: 'mission_tag', titleKey: 'mission_title'),
-                        const SizedBox(height: 18),
-                        _ScrollReveal(
-                          index: 0,
-                          child: _MissionCard(
-                            iconPainter: const _SustainabilityIconPainter(),
-                            glow: AppColors.green,
-                            titleKey: 'mission1_title',
-                            bodyKey: 'mission1_body',
-                          ),
-                        ),
-                        const SizedBox(height: 18),
-                        _ScrollReveal(
-                          index: 1,
-                          child: _MissionCard(
-                            iconPainter: const _HealthIconPainter(),
-                            glow: AppColors.cyan,
-                            titleKey: 'mission2_title',
-                            bodyKey: 'mission2_body',
-                          ),
-                        ),
-                        const SizedBox(height: 18),
-                        _ScrollReveal(
-                          index: 2,
-                          child: _MissionCard(
-                            iconPainter: const _EconomicsIconPainter(),
-                            glow: AppColors.yellow,
-                            titleKey: 'mission3_title',
-                            bodyKey: 'mission3_body',
-                          ),
-                        ),
-                        const SizedBox(height: 30),
-                        const _SectionHead(tagKey: 'about_tag', titleKey: 'about_title'),
-                        const SizedBox(height: 18),
-                        const _AboutBox(),
-                        const SizedBox(height: 30),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
+              ),
             ),
           ),
         ],
@@ -1864,23 +2555,16 @@ class _FarmScenePainter extends CustomPainter {
 
   // â”€â”€ Clouds â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   void _drawClouds(Canvas canvas, double w, double h) {
-    final speed = 0.055 + _sm * 0.20;
-    // Each cloud has a fixed phase offset (0.0 – 0.75) spread evenly across
-    // the 0→1 cycle so they never all wrap at the same moment.
-    // Position maps 0→1 to (-cloudW) → (w + cloudW) so the cloud is fully
-    // off-screen on both sides before it "teleports" — making the loop
-    // completely invisible and smooth.
+    final speed = 0.014 + _sm * 0.20;
     final clouds = [
-      // [phaseOffset, yFrac, widthFrac, alpha]
-      [0.00, 0.10, 0.24, 0.72],
-      [0.25, 0.06, 0.18, 0.58],
-      [0.50, 0.13, 0.22, 0.65],
-      [0.75, 0.18, 0.15, 0.50],
+      [0.06, 0.10, 0.24, 0.72],
+      [0.44, 0.06, 0.18, 0.58],
+      [0.68, 0.13, 0.22, 0.65],
+      [0.28, 0.18, 0.15, 0.50],
     ];
     for (final c in clouds) {
-      final phase = (c[0] + t * speed) % 1.0; // always 0..1, seamless
-      final cx = (phase * (w + c[2] * w * 2)) - c[2] * w; // enters from left edge, exits right
-      _drawCloud(canvas, cx, c[1] * h, c[2] * w, c[3]);
+      final xBase = ((c[0] + t * speed * 3.0) % 1.35) - 0.18;
+      _drawCloud(canvas, xBase * w, c[1] * h, c[2] * w, c[3] / 1.0);
     }
   }
 
@@ -2031,7 +2715,7 @@ class _FarmScenePainter extends CustomPainter {
 
   // â”€â”€ Windmills â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   void _drawWindmills(Canvas canvas, double w, double h) {
-    final baseAngle = t * math.pi * 2 * 2.5;
+    final baseAngle = t * math.pi * 2 * 1.5;
     final extraSpin = _sm * math.pi * 2 * 4;
     final angle     = baseAngle + extraSpin;
 
@@ -2158,7 +2842,8 @@ class _FarmScenePainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _FarmScenePainter old) => true;
+  bool shouldRepaint(covariant _FarmScenePainter old) =>
+      old.t != t || old.scrollSpeed != scrollSpeed;
 
   // ── Helper utilities ───────────────────────────────────
   List<List<double>> _starPositions(double w, double h) {
@@ -2177,6 +2862,216 @@ class _FarmScenePainter extends CustomPainter {
 
   double _sin01(double x) => (math.sin(x * math.pi * 2) + 1) / 2;
 }
+
+/** 
+class _FarmScenePainter extends CustomPainter {
+  final double t;           // 0..1 repeating master time
+  final double scrollSpeed; // px/s – drives cloud + grass speed
+
+  const _FarmScenePainter({required this.t, required this.scrollSpeed});
+
+  double get _sm => (scrollSpeed / 800.0).clamp(0.0, 1.0);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final w = size.width;
+    final h = size.height;
+
+    _drawSky(canvas, w, h);
+    _drawStars(canvas, w, h);
+    _drawMoon(canvas, w, h);
+    _drawClouds(canvas, w, h);
+    _drawMountains(canvas, w, h);
+    _drawHills(canvas, w, h);
+    _drawFarmhouse(canvas, w, h);
+    _drawWindmills(canvas, w, h);
+    _drawGrass(canvas, w, h);
+  }
+
+  void _drawSky(Canvas canvas, double w, double h) {
+    final paint = Paint()
+      ..shader = const LinearGradient(
+        begin: Alignment.topCenter,
+        end: Alignment.bottomCenter,
+        colors: [
+          Color(0xFF060F2A),
+          Color(0xFF0B1E4A),
+          Color(0xFF0F2E5E),
+          Color(0xFF0A2540),
+        ],
+        stops: [0.0, 0.40, 0.72, 1.0],
+      ).createShader(Rect.fromLTWH(0, 0, w, h));
+    canvas.drawRect(Rect.fromLTWH(0, 0, w, h), paint);
+  }
+
+  void _drawStars(Canvas canvas, double w, double h) {
+    final starPositions = [
+      Offset(w * 0.10, h * 0.08), Offset(w * 0.25, h * 0.15),
+      Offset(w * 0.45, h * 0.05), Offset(w * 0.60, h * 0.18),
+      Offset(w * 0.75, h * 0.12), Offset(w * 0.90, h * 0.06),
+      Offset(w * 0.18, h * 0.22), Offset(w * 0.52, h * 0.25),
+      Offset(w * 0.82, h * 0.20),
+    ];
+    for (int i = 0; i < starPositions.length; i++) {
+      final pos = starPositions[i];
+      final phase = (t * 3.0 + i * 0.37) % 1.0;
+      final opacity = (0.3 + 0.7 * math.sin(phase * math.pi)).clamp(0.0, 1.0);
+      canvas.drawCircle(
+        pos, 1.5,
+        Paint()..color = Colors.white.withOpacity(opacity),
+      );
+    }
+  }
+
+  void _drawMoon(Canvas canvas, double w, double h) {
+    final cx = w * 0.80;
+    final cy = h * 0.09;
+    canvas.drawCircle(Offset(cx, cy), 32,
+        Paint()..color = const Color(0x33B8D8FF)..maskFilter = const MaskFilter.blur(BlurStyle.normal, 24));
+    canvas.drawCircle(Offset(cx, cy), 15,
+        Paint()..color = const Color(0xFFDCEEFF));
+    canvas.drawCircle(Offset(cx + 6, cy - 4), 12,
+        Paint()..color = const Color(0xFF0B1E4A));
+  }
+
+  void _drawClouds(Canvas canvas, double w, double h) {
+    final speed = 0.014 + _sm * 0.20;
+    final clouds = [
+      [0.06, 0.10, 0.24, 0.72],
+      [0.44, 0.06, 0.18, 0.58],
+      [0.68, 0.13, 0.22, 0.65],
+      [0.28, 0.18, 0.15, 0.50],
+    ];
+    for (final c in clouds) {
+      final xBase = ((c[0] + t * speed * 3.0) % 1.35) - 0.18;
+      _drawCloud(canvas, xBase * w, c[1] * h, c[2] * w, c[3]);
+    }
+  }
+
+  void _drawCloud(Canvas canvas, double cx, double cy, double cw, double alpha) {
+    final paint = Paint()..color = Color.fromRGBO(160, 195, 235, alpha * 0.70);
+    final ch = cw * 0.40;
+    canvas.drawOval(Rect.fromCenter(center: Offset(cx, cy), width: cw, height: ch), paint);
+    canvas.drawOval(Rect.fromCenter(center: Offset(cx - cw * 0.28, cy + ch * 0.08), width: cw * 0.54, height: ch * 0.82), paint);
+    canvas.drawOval(Rect.fromCenter(center: Offset(cx + cw * 0.26, cy + ch * 0.10), width: cw * 0.50, height: ch * 0.78), paint);
+    canvas.drawOval(Rect.fromCenter(center: Offset(cx - cw * 0.04, cy - ch * 0.34), width: cw * 0.44, height: ch * 0.72), paint);
+  }
+
+  void _drawMountains(Canvas canvas, double w, double h) {
+    final farPaint = Paint()..color = const Color(0xFF183A6B);
+    final farPath = Path()
+      ..moveTo(0, h * 0.52)
+      ..cubicTo(w * 0.10, h * 0.28, w * 0.22, h * 0.36, w * 0.30, h * 0.44)
+      ..cubicTo(w * 0.38, h * 0.20, w * 0.50, h * 0.30, w * 0.58, h * 0.44)
+      ..cubicTo(w * 0.65, h * 0.24, w * 0.78, h * 0.32, w * 0.85, h * 0.46)
+      ..lineTo(w, h * 0.50)..lineTo(w, h)..lineTo(0, h)..close();
+    canvas.drawPath(farPath, farPaint);
+
+    final midPaint = Paint()..color = const Color(0xFF112F55);
+    final midPath = Path()
+      ..moveTo(0, h * 0.60)
+      ..cubicTo(w * 0.12, h * 0.42, w * 0.20, h * 0.50, w * 0.28, h * 0.56)
+      ..cubicTo(w * 0.36, h * 0.34, w * 0.44, h * 0.44, w * 0.52, h * 0.57)
+      ..cubicTo(w * 0.62, h * 0.36, w * 0.72, h * 0.46, w * 0.80, h * 0.55)
+      ..cubicTo(w * 0.88, h * 0.40, w * 0.94, h * 0.48, w, h * 0.54)
+      ..lineTo(w, h)..lineTo(0, h)..close();
+    canvas.drawPath(midPath, midPaint);
+  }
+
+  void _drawHills(Canvas canvas, double w, double h) {
+    final hill1 = Paint()..color = const Color(0xFF0D2E4A);
+    final path1 = Path()
+      ..moveTo(0, h * 0.67)
+      ..cubicTo(w * 0.20, h * 0.55, w * 0.40, h * 0.62, w * 0.55, h * 0.68)
+      ..cubicTo(w * 0.70, h * 0.56, w * 0.85, h * 0.64, w, h * 0.66)
+      ..lineTo(w, h)..lineTo(0, h)..close();
+    canvas.drawPath(path1, hill1);
+
+    final hill2 = Paint()..color = const Color(0xFF092238);
+    final path2 = Path()
+      ..moveTo(0, h * 0.76)
+      ..cubicTo(w * 0.25, h * 0.68, w * 0.50, h * 0.74, w * 0.75, h * 0.70)
+      ..cubicTo(w * 0.88, h * 0.68, w * 0.95, h * 0.72, w, h * 0.74)
+      ..lineTo(w, h)..lineTo(0, h)..close();
+    canvas.drawPath(path2, hill2);
+  }
+
+  void _drawFarmhouse(Canvas canvas, double w, double h) {
+    final x = w * 0.20;
+    final y = h * 0.68;
+    
+    // House base
+    canvas.drawRect(
+      Rect.fromLTWH(x, y, 36, 24),
+      Paint()..color = const Color(0xFF061826),
+    );
+    // Roof
+    final roof = Path()
+      ..moveTo(x - 4, y)
+      ..lineTo(x + 18, y - 14)
+      ..lineTo(x + 40, y)
+      ..close();
+    canvas.drawPath(roof, Paint()..color = const Color(0xFF1B0B0B));
+
+    // Warm glowing window
+    final glowAlpha = (0.6 + 0.4 * math.sin(t * math.pi * 4)).clamp(0.0, 1.0);
+    final windowPaint = Paint()
+      ..color = AppColors.orange.withOpacity(glowAlpha)
+      ..maskFilter = const MaskFilter.blur(BlurStyle.solid, 4);
+    canvas.drawRect(Rect.fromLTWH(x + 12, y + 6, 10, 10), windowPaint);
+  }
+
+  void _drawWindmills(Canvas canvas, double w, double h) {
+    final positions = [Offset(w * 0.65, h * 0.62), Offset(w * 0.82, h * 0.58)];
+    for (int i = 0; i < positions.length; i++) {
+      final pos = positions[i];
+      final polePaint = Paint()
+        ..color = const Color(0xFF112F55)
+        ..strokeWidth = 2.5;
+      
+      // Pole
+      canvas.drawLine(pos, Offset(pos.dx, pos.dy + 35), polePaint);
+
+      // Rotating blades
+      final angle = (t * 2 * math.pi * 2) + (i * math.pi / 4);
+      canvas.save();
+      canvas.translate(pos.dx, pos.dy);
+      canvas.rotate(angle);
+      
+      final bladePaint = Paint()
+        ..color = const Color(0xFF2A5A9A)
+        ..strokeWidth = 2.0;
+      for (int b = 0; b < 3; b++) {
+        canvas.rotate((2 * math.pi) / 3);
+        canvas.drawLine(Offset.zero, const Offset(0, -18), bladePaint);
+      }
+      canvas.restore();
+    }
+  }
+
+  void _drawGrass(Canvas canvas, double w, double h) {
+    final grassPaint = Paint()
+      ..color = const Color(0xFF0B3D2E)
+      ..strokeWidth = 1.8
+      ..strokeCap = StrokeCap.round;
+
+    final count = (w / 12).floor();
+    for (int i = 0; i < count; i++) {
+      final gx = i * 12.0 + (i % 3);
+      final gy = h * 0.88 + (i % 5) * 4;
+      final sway = math.sin(t * math.pi * 2 + i) * (3.0 + _sm * 8.0);
+
+      canvas.drawLine(Offset(gx, gy), Offset(gx + sway, gy - 16), grassPaint);
+      canvas.drawLine(Offset(gx + 3, gy), Offset(gx + 3 + sway * 0.8, gy - 12), grassPaint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _FarmScenePainter oldDelegate) {
+    return oldDelegate.t != t || oldDelegate.scrollSpeed != scrollSpeed;
+  }
+} 
+**/
 
 // 2. Hero scene overlay painter (shimmering crop rows + layered fields)
 class _HeroScenePainter extends CustomPainter {
@@ -2406,7 +3301,7 @@ class _ScrollRevealState extends State<_ScrollReveal> with SingleTickerProviderS
     super.initState();
     _controller = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 300),
+      duration: const Duration(milliseconds: 800),
     );
     _curve = CurvedAnimation(parent: _controller, curve: const Cubic(0.16, 1, 0.3, 1));
   }
@@ -2420,8 +3315,8 @@ class _ScrollRevealState extends State<_ScrollReveal> with SingleTickerProviderS
   void _onVisibilityChanged(VisibilityInfo info) {
     if (!_triggered && info.visibleFraction > 0.18) {
       _triggered = true;
-      // fire immediately, with a tiny stagger by index
-      Future.delayed(Duration(milliseconds: widget.index * 40), () {
+      // wait 2 s after becoming visible, then stagger by index
+      Future.delayed(Duration(milliseconds: 2000 + widget.index * 80), () {
         if (mounted) _controller.forward();
       });
     }
@@ -2780,101 +3675,87 @@ class _FeatureCardState extends State<_FeatureCard> with SingleTickerProviderSta
         widget.onTap(context);
       },
       onTapCancel: () => setState(() => _pressed = false),
-      child: AnimatedContainer(
+      child: AnimatedScale(
+        scale: _pressed ? 0.96 : 1.0,
         duration: const Duration(milliseconds: 180),
         curve: Curves.easeOut,
-        clipBehavior: Clip.antiAlias,
-        decoration: BoxDecoration(
-          color: AppColors.neumoFace,
-          borderRadius: BorderRadius.circular(22),
-          boxShadow: _pressed
-              ? [
-                  BoxShadow(
-                    color: AppColors.neumoDark.withOpacity(0.9),
-                    offset: const Offset(4, 4),
-                    blurRadius: 10,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 300),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(22),
+            border: Border.all(
+              color: _pressed ? widget.color.withOpacity(0.6) : widget.color.withOpacity(0.22),
+              width: 1.5,
+            ),
+            boxShadow: _pressed
+                ? [BoxShadow(color: widget.color.withOpacity(0.28), blurRadius: 28, spreadRadius: 2)]
+                : [BoxShadow(color: widget.color.withOpacity(0.10), blurRadius: 14)],
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(21),
+            child: BackdropFilter(
+              filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+              child: Container(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [
+                      Colors.white.withOpacity(_pressed ? 0.18 : 0.13),
+                      widget.color.withOpacity(_pressed ? 0.12 : 0.06),
+                    ],
                   ),
-                  BoxShadow(
-                    color: AppColors.neumoLight.withOpacity(0.25),
-                    offset: const Offset(-2, -2),
-                    blurRadius: 6,
-                  ),
-                ]
-              : [
-                  BoxShadow(
-                    color: AppColors.neumoDark.withOpacity(0.85),
-                    offset: const Offset(6, 6),
-                    blurRadius: 16,
-                  ),
-                  BoxShadow(
-                    color: AppColors.neumoLight.withOpacity(0.35),
-                    offset: const Offset(-5, -5),
-                    blurRadius: 14,
-                  ),
-                ],
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
                     // â”€â”€ Preview pane â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
                     Expanded(
                       child: Stack(
                         children: [
+                          // Tinted preview background
                           Positioned.fill(
-                    child: Container(
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          begin: Alignment.topCenter,
-                          end: Alignment.bottomCenter,
-                          colors: [
-                            widget.color.withOpacity(0.07),
-                            Colors.transparent,
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
-                    child: widget.previewChild,
-                  ),
+                            child: Container(
+                              decoration: BoxDecoration(
+                                gradient: LinearGradient(
+                                  begin: Alignment.topCenter,
+                                  end: Alignment.bottomCenter,
+                                  colors: [
+                                    widget.color.withOpacity(0.08),
+                                    Colors.transparent,
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
+                            child: widget.previewChild,
+                          ),
                         ],
                       ),
                     ),
 
                     // â”€â”€ Frosted label strip â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
                     Container(
-              padding: const EdgeInsets.fromLTRB(14, 10, 14, 14),
-              decoration: BoxDecoration(
-                color: AppColors.neumoDark.withOpacity(0.5),
-                border: Border(
-                  top: BorderSide(color: widget.color.withOpacity(0.18)),
-                ),
-              ),
+                      padding: const EdgeInsets.fromLTRB(14, 10, 14, 14),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withOpacity(0.18),
+                        border: Border(top: BorderSide(color: widget.color.withOpacity(0.15))),
+                      ),
                       child: Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           AnimatedBuilder(
                             animation: _pulseAnim,
                             builder: (_, __) => Container(
-                      width: 34,
-                      height: 34,
-                      decoration: BoxDecoration(
-                        color: AppColors.neumoFace,
-                        borderRadius: BorderRadius.circular(10),
-                        boxShadow: [
-                          BoxShadow(
-                            color: AppColors.neumoDark.withOpacity(0.7),
-                            offset: const Offset(2, 2),
-                            blurRadius: 4 + _pulseAnim.value * 2,
-                          ),
-                          BoxShadow(
-                            color: AppColors.neumoLight.withOpacity(0.25 + _pulseAnim.value * 0.1),
-                            offset: const Offset(-2, -2),
-                            blurRadius: 4 + _pulseAnim.value * 2,
-                          ),
-                        ],
-                      ),
+                              width: 34,
+                              height: 34,
+                              decoration: BoxDecoration(
+                                color: widget.color.withOpacity(0.15 + _pulseAnim.value * 0.08),
+                                borderRadius: BorderRadius.circular(10),
+                                border: Border.all(color: widget.color.withOpacity(0.4)),
+                              ),
                               alignment: Alignment.center,
                               child: Icon(widget.icon, size: 16, color: widget.color),
                             ),
@@ -2911,6 +3792,10 @@ class _FeatureCardState extends State<_FeatureCard> with SingleTickerProviderSta
                   ],
                 ),
               ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
