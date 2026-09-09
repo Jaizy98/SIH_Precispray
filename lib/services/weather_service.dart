@@ -10,9 +10,9 @@ class WeatherService {
         "https://api.open-meteo.com/v1/forecast"
         "?latitude=$latitude"
         "&longitude=$longitude"
-        "&current=temperature_2m,relative_humidity_2m,wind_speed_10m"
-        "&hourly=temperature_2m,relative_humidity_2m,wind_speed_10m,precipitation_probability"
-        "&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max"
+        "&current=temperature_2m,relative_humidity_2m,wind_speed_10m,weathercode"
+        "&hourly=temperature_2m,relative_humidity_2m,wind_speed_10m,precipitation_probability,weathercode"
+        "&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max,weathercode"
         "&timezone=auto"
         "&forecast_days=7";
 

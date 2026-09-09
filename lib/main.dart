@@ -1,17 +1,21 @@
 ﻿import 'dart:async';
 import 'dart:math' as math;
 import 'dart:ui';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:video_player/video_player.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:visibility_detector/visibility_detector.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:http/http.dart' as http;
 import 'firebase_options.dart';
 import 'screens/weather_screen.dart';
 import 'screens/map_screen.dart';
 import 'screens/spray_report_screen.dart';
 import 'screens/networking_screen.dart';
+import 'services/weather_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -414,7 +418,7 @@ class _AnimationScreenState extends State<AnimationScreen> {
     // Hard fallback: if the video never initializes, bail after 5 s.
     _fallbackTimer = Timer(const Duration(seconds: 5), _navigateToDashboard);
 
-    _controller = VideoPlayerController.asset('assets/animation.mp4');
+    _controller = VideoPlayerController.asset('assets/clean_modi.mp4');
     _controller.initialize().then((_) {
       if (!mounted) return;
       setState(() {});
@@ -461,21 +465,20 @@ class _AnimationScreenState extends State<AnimationScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final size = MediaQuery.of(context).size;
     return Scaffold(
       backgroundColor: Colors.black,
-      body: SafeArea(
-        child: Column(
-          children: [
-            Expanded(child: Image.asset('assets/top_image.png', fit: BoxFit.cover)),
-            _controller.value.isInitialized
-                ? AspectRatio(
-                    aspectRatio: _controller.value.aspectRatio,
-                    child: VideoPlayer(_controller),
-                  )
-                : const CircularProgressIndicator(),
-            Expanded(child: Image.asset('assets/bottom_image.png', fit: BoxFit.cover)),
-          ],
-        ),
+      body: SizedBox.expand(
+        child: _controller.value.isInitialized
+            ? FittedBox(
+                fit: BoxFit.cover,
+                child: SizedBox(
+                  width: _controller.value.size.width,
+                  height: _controller.value.size.height,
+                  child: VideoPlayer(_controller),
+                ),
+              )
+            : const SizedBox.shrink(),
       ),
     );
   }
@@ -2958,9 +2961,59 @@ class _SprayPathPainter extends CustomPainter {
   bool shouldRepaint(covariant CustomPainter o) => false;
 }
 
-// â”€â”€ 2. Weather Preview â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-class _WeatherPreview extends StatelessWidget {
+
+// ── 2. Weather Preview — fetches live temperature ─────────────────────────
+class _WeatherPreview extends StatefulWidget {
   const _WeatherPreview();
+  @override
+  State<_WeatherPreview> createState() => _WeatherPreviewState();
+}
+
+class _WeatherPreviewState extends State<_WeatherPreview> {
+  String _temp = '—';
+  String _icon = '🌤️';
+  bool _loaded = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchTemp();
+  }
+
+  Future<void> _fetchTemp() async {
+    try {
+      LocationPermission perm = await Geolocator.checkPermission();
+      if (perm == LocationPermission.denied) {
+        perm = await Geolocator.requestPermission();
+      }
+      final pos = await Geolocator.getCurrentPosition(
+          desiredAccuracy: LocationAccuracy.low);
+      final data = await WeatherService().getWeather(pos.latitude, pos.longitude);
+      final cur = data['current'] as Map<String, dynamic>;
+      final tempInt = (cur['temperature_2m'] as num).round();
+      final code = (cur['weathercode'] as num?)?.toInt() ?? 0;
+      final hour = DateTime.now().hour;
+      final isNight = hour < 6 || hour >= 20;
+      final icon = _iconFor(code, isNight);
+      if (mounted) setState(() { _temp = '$tempInt°'; _icon = icon; _loaded = true; });
+    } catch (_) {
+      if (mounted) setState(() { _temp = '—'; _loaded = true; });
+    }
+  }
+
+  String _iconFor(int code, bool isNight) {
+    if (code == 0)                return isNight ? '🌙' : '☀️';
+    if (code == 1)                return isNight ? '🌙' : '🌤️';
+    if (code == 2)                return '⛅';
+    if (code == 3)                return '☁️';
+    if (code >= 45 && code <= 48) return '🌫️';
+    if (code >= 51 && code <= 55) return '🌦️';
+    if (code >= 61 && code <= 65) return '🌧️';
+    if (code >= 71 && code <= 77) return '❄️';
+    if (code >= 80 && code <= 82) return '🌦️';
+    if (code >= 95 && code <= 99) return '⛈️';
+    return isNight ? '🌙' : '🌤️';
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -2976,51 +3029,12 @@ class _WeatherPreview extends StatelessWidget {
         ),
         const SizedBox(height: 6),
         Text(
-          "24°C",
-          style: monoFont(size: 28, color: AppColors.yellow),
+          _loaded ? _temp : '…',
+          style: monoFont(size: 28, color: Colors.white),
         ),
-        const SizedBox(height: 4),
-        Row(children: [
-          _weatherChip(Icons.water_drop_outlined, "68%", AppColors.cyan),
-          const SizedBox(width: 6),
-          _weatherChip(Icons.air, "12 km/h", AppColors.orange),
-        ]),
-        const SizedBox(height: 8),
-        // Temp bar
-        _miniTempBar(),
         const SizedBox(height: 6),
-        Text("Partly Cloudy · Safe to spray", style: bodyFont(size: 9, color: AppColors.green)),
+        Text(_icon, style: const TextStyle(fontSize: 22)),
       ],
-    );
-  }
-
-  Widget _weatherChip(IconData icon, String label, Color color) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-      decoration: BoxDecoration(
-        color: color.withOpacity(0.12),
-        borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: color.withOpacity(0.25)),
-      ),
-      child: Row(mainAxisSize: MainAxisSize.min, children: [
-        Icon(icon, size: 9, color: color),
-        const SizedBox(width: 3),
-        Text(label, style: bodyFont(size: 9, color: color)),
-      ]),
-    );
-  }
-
-  Widget _miniTempBar() {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(999),
-      child: Container(
-        height: 6,
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            colors: [Color(0xFF4ADE80), Color(0xFFFFD23F), Color(0xFFFF8C42), Color(0xFFFF4444)],
-          ),
-        ),
-      ),
     );
   }
 }
@@ -3029,145 +3043,197 @@ class _ReportPreview extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text("Last Session", style: bodyFont(size: 10, color: AppColors.textMuted)),
-        const SizedBox(height: 6),
-        _sessionRow("North Plot A", "1.4 ac", AppColors.green),
-        const SizedBox(height: 5),
-        _sessionRow("South Plot B", "2.1 ac", AppColors.cyan),
-        const SizedBox(height: 5),
-        _sessionRow("East Plot C",  "0.8 ac", AppColors.yellow),
-        const SizedBox(height: 8),
-        // Efficiency sparkline
-        _miniSparkline(),
-        const SizedBox(height: 4),
-        Text("3 sessions recorded", style: bodyFont(size: 9, color: AppColors.textMuted)),
-      ],
+    const amber = Color(0xFFD4A843);
+    const paperBg = Color(0xFF1A1208); // very dark warm paper tone
+    return Container(
+      decoration: BoxDecoration(
+        color: paperBg,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: amber.withOpacity(0.25), width: 1),
+      ),
+      padding: const EdgeInsets.fromLTRB(8, 6, 8, 6),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Header band — like a report title bar
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+            decoration: BoxDecoration(
+              color: amber.withOpacity(0.18),
+              borderRadius: BorderRadius.circular(4),
+            ),
+            child: Text(
+              'SPRAY SESSION REPORT',
+              style: bodyFont(size: 7, weight: FontWeight.w800, color: amber)
+                  .copyWith(letterSpacing: 1.2),
+            ),
+          ),
+          const SizedBox(height: 5),
+          // Ruled data lines
+          _reportLine('Plot', 'North Plot A', amber),
+          _ruleDivider(),
+          _reportLine('Area', '1.4 ac', amber),
+          _ruleDivider(),
+          _reportLine('Coverage', '91.5%', const Color(0xFF7EC87A)),
+          _ruleDivider(),
+          _reportLine('Sessions', '3 recorded', amber),
+          const SizedBox(height: 6),
+          // Stamp — sits below the data, right-aligned
+          Align(
+            alignment: Alignment.centerRight,
+            child: Transform.rotate(
+              angle: -0.4,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                decoration: BoxDecoration(
+                  border: Border.all(color: const Color(0xFF7EC87A).withOpacity(0.7), width: 1.5),
+                  borderRadius: BorderRadius.circular(3),
+                ),
+                child: Text(
+                  '✓ DONE',
+                  style: bodyFont(size: 7, weight: FontWeight.w900,
+                      color: const Color(0xFF7EC87A).withOpacity(0.75))
+                      .copyWith(letterSpacing: 1.0),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
-  Widget _sessionRow(String name, String area, Color color) {
-    return Row(children: [
-      Container(
-        width: 5, height: 5,
-        decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-      ),
-      const SizedBox(width: 6),
-      Expanded(child: Text(name, style: bodyFont(size: 10, color: Colors.white), overflow: TextOverflow.ellipsis)),
-      Text(area, style: bodyFont(size: 10, color: color)),
-    ]);
-  }
-
-  Widget _miniSparkline() {
-    return SizedBox(
-      height: 20,
-      child: CustomPaint(
-        size: const Size(double.infinity, 20),
-        painter: _SparklinePainter(),
+  Widget _reportLine(String label, String value, Color valueColor) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        children: [
+          Text(label, style: bodyFont(size: 8, color: const Color(0xFFBBA060))),
+          const Spacer(),
+          Text(value, style: bodyFont(size: 8, weight: FontWeight.w700, color: valueColor)),
+        ],
       ),
     );
   }
+
+  Widget _ruleDivider() => Container(
+    height: 0.5,
+    color: const Color(0xFFD4A843).withOpacity(0.15),
+  );
 }
-
-class _SparklinePainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    final values = [0.6, 0.75, 0.5, 0.9, 0.8, 0.95, 0.85];
-    final pts = List.generate(values.length, (i) {
-      final x = (i / (values.length - 1)) * size.width;
-      final y = size.height - values[i] * size.height;
-      return Offset(x, y);
-    });
-
-    // Fill
-    final fillPath = Path()..moveTo(0, size.height);
-    for (final p in pts) { fillPath.lineTo(p.dx, p.dy); }
-    fillPath.lineTo(size.width, size.height);
-    fillPath.close();
-    canvas.drawPath(fillPath, Paint()
-      ..shader = LinearGradient(
-        begin: Alignment.topCenter,
-        end: Alignment.bottomCenter,
-        colors: [AppColors.green.withOpacity(0.35), Colors.transparent],
-      ).createShader(Rect.fromLTWH(0, 0, size.width, size.height)));
-
-    // Line
-    final linePath = Path()..moveTo(pts.first.dx, pts.first.dy);
-    for (final p in pts.skip(1)) { linePath.lineTo(p.dx, p.dy); }
-    canvas.drawPath(linePath, Paint()
-      ..color = AppColors.green
-      ..strokeWidth = 1.5
-      ..style = PaintingStyle.stroke
-      ..strokeCap = StrokeCap.round);
-  }
-  @override
-  bool shouldRepaint(covariant CustomPainter o) => false;
-}
-
 // â”€â”€ Networking feature card preview â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 class _NetworkingPreview extends StatelessWidget {
   const _NetworkingPreview();
 
   @override
   Widget build(BuildContext context) {
-    // Network grid visualization — nodes connected by lines
     return CustomPaint(
       size: const Size(double.infinity, 90),
-      painter: _NetworkGridPainter(),
+      painter: _FarmerNetworkPainter(),
     );
   }
 }
 
-// Network grid painter — draws nodes connected by lines suggesting connectivity
-class _NetworkGridPainter extends CustomPainter {
-  const _NetworkGridPainter();
+// Organic scattered network — nodes of varying sizes connected in a web,
+// inspired by social/farmer network maps. No profile icons, pure connectivity.
+class _FarmerNetworkPainter extends CustomPainter {
+  const _FarmerNetworkPainter();
 
+  // Node positions as fractions of (width, height), with radius scale
+  // [xFrac, yFrac, radiusScale]  1.0 = normal, 1.6 = hub
   static const _nodes = [
-    Offset(0.15, 0.20), Offset(0.45, 0.12), Offset(0.78, 0.22),
-    Offset(0.25, 0.60), Offset(0.55, 0.50), Offset(0.85, 0.65),
-    Offset(0.40, 0.88),
+    [0.08, 0.22, 1.0],  // 0 — far left top
+    [0.22, 0.55, 1.0],  // 1 — left mid
+    [0.18, 0.85, 0.8],  // 2 — left bottom
+    [0.38, 0.18, 0.8],  // 3 — top centre-left
+    [0.42, 0.50, 1.6],  // 4 — main hub (centre)
+    [0.38, 0.82, 1.0],  // 5 — centre bottom
+    [0.60, 0.28, 1.0],  // 6 — top right
+    [0.65, 0.65, 0.8],  // 7 — right mid-low
+    [0.80, 0.40, 1.2],  // 8 — right hub
+    [0.92, 0.70, 0.8],  // 9 — far right bottom
+    [0.75, 0.88, 0.7],  // 10 — right bottom
+    [0.55, 0.92, 0.7],  // 11 — bottom centre
   ];
 
+  // Edges — [from, to]
   static const _edges = [
-    [0, 1], [1, 2], [0, 3], [1, 4], [2, 5],
-    [3, 4], [4, 5], [3, 6], [4, 6],
+    [0, 1], [0, 3],
+    [1, 2], [1, 4], [1, 3],
+    [2, 5],
+    [3, 4], [3, 6],
+    [4, 5], [4, 6], [4, 7], [4, 8],
+    [5, 11], [5, 7],
+    [6, 8],
+    [7, 8], [7, 10], [7, 11],
+    [8, 9],
+    [9, 10],
+    [10, 11],
   ];
 
   @override
   void paint(Canvas canvas, Size size) {
+    final w = size.width;
+    final h = size.height;
+
+    const baseColor  = Color(0xFF6B8FE8); // ultramarine node blue
+    const lineColor  = Color(0xFF3A5FCD);
+    const hubColor   = Color(0xFF8FAAFF); // brighter for main hub
+
+    // Draw edges first (behind nodes)
     final linePaint = Paint()
-      ..color = const Color(0xFF3A5FCD).withOpacity(0.45)
-      ..strokeWidth = 1.0
+      ..strokeWidth = 0.8
       ..style = PaintingStyle.stroke;
 
-    final nodePaint = Paint()
-      ..color = const Color(0xFF6B8FE8)
-      ..style = PaintingStyle.fill;
-
-    final glowPaint = Paint()
-      ..color = const Color(0xFF3A5FCD).withOpacity(0.25)
-      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 4);
-
-    // draw edges
     for (final e in _edges) {
-      final a = Offset(_nodes[e[0]].dx * size.width, _nodes[e[0]].dy * size.height);
-      final b = Offset(_nodes[e[1]].dx * size.width, _nodes[e[1]].dy * size.height);
+      final a = Offset(_nodes[e[0]][0] * w, _nodes[e[0]][1] * h);
+      final b = Offset(_nodes[e[1]][0] * w, _nodes[e[1]][1] * h);
+      // lines fade based on distance — closer = more opaque
+      final dist = (b - a).distance;
+      final opacity = (1.0 - (dist / w) * 0.8).clamp(0.18, 0.55);
+      linePaint.color = lineColor.withOpacity(opacity);
       canvas.drawLine(a, b, linePaint);
     }
 
-    // draw nodes
-    for (final n in _nodes) {
-      final pos = Offset(n.dx * size.width, n.dy * size.height);
-      canvas.drawCircle(pos, 5.5, glowPaint);
-      canvas.drawCircle(pos, 3.5, nodePaint);
+    // Draw nodes on top
+    for (int i = 0; i < _nodes.length; i++) {
+      final nx = _nodes[i][0] * w;
+      final ny = _nodes[i][1] * h;
+      final rs = _nodes[i][2];
+      final pos = Offset(nx, ny);
+      final isHub = rs >= 1.5;
+      final baseR = isHub ? 6.5 : 4.0 * rs;
+      final color = isHub ? hubColor : baseColor;
+
+      // outer glow
+      canvas.drawCircle(pos, baseR + 4,
+          Paint()
+            ..color = color.withOpacity(0.15)
+            ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 5));
+
+      // ring
+      canvas.drawCircle(pos, baseR + 1.5,
+          Paint()
+            ..color = color.withOpacity(0.35)
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 1.0);
+
+      // filled core
+      canvas.drawCircle(pos, baseR,
+          Paint()
+            ..color = isHub
+                ? color.withOpacity(0.90)
+                : color.withOpacity(0.55)
+            ..style = PaintingStyle.fill);
     }
   }
 
   @override
   bool shouldRepaint(covariant CustomPainter old) => false;
 }
+
+
 
 Widget _miniStat(String label, Color color) {
   return Container(

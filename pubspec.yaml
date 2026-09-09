@@ -46,6 +46,7 @@ flutter:
   assets:
     - assets/login_bg.png
     - assets/animation.mp4
+    - assets/clean_modi.mp4
     - assets/top_image.png
     - assets/bottom_image.png
     - assets/farm1.jpg

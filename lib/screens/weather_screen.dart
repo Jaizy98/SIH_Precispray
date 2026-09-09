@@ -266,10 +266,8 @@ class _SprayWindowCard extends StatelessWidget {
     return Container(
       width: 148, margin: const EdgeInsets.only(right: 12), padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        gradient: const LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight,
-            colors: [Color(0x26FFFFFF), Color(0x14FFFFFF)]),
+        color: const Color(0x1AFFFFFF),
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: window.ratingColor.withValues(alpha: 0.35)),
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min,
         children: [
@@ -287,22 +285,21 @@ class _SprayWindowCard extends StatelessWidget {
                 style: _body(size: 11, color: window.ratingColor).copyWith(fontWeight: FontWeight.w600)),
           ]),
           const SizedBox(height: 10),
-          _chip(Icons.air,                 '${window.avgWind.toStringAsFixed(0)} km/h', _C.orange),
+          _chipRow(Icons.air,                 '${window.avgWind.toStringAsFixed(0)} km/h', _C.orange),
           const SizedBox(height: 5),
-          _chip(Icons.water_drop_outlined, '${window.avgHumidity.toStringAsFixed(0)}%',  _C.cyan),
+          _chipRow(Icons.water_drop_outlined, '${window.avgHumidity.toStringAsFixed(0)}%',  _C.cyan),
           const SizedBox(height: 5),
-          _chip(Icons.thermostat_outlined, '${window.avgTemp.toStringAsFixed(0)}°C',     _C.textBody),
+          _chipRow(Icons.thermostat_outlined, '${window.avgTemp.toStringAsFixed(0)}°C',     _C.textBody),
         ],
       ),
     );
   }
-  Widget _chip(IconData icon, String label, Color c) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-    decoration: BoxDecoration(color: c.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: c.withValues(alpha: 0.3))),
+  Widget _chipRow(IconData icon, String label, Color c) => Padding(
+    padding: const EdgeInsets.symmetric(vertical: 2),
     child: Row(mainAxisSize: MainAxisSize.min, children: [
-      Icon(icon, size: 10, color: c), const SizedBox(width: 4),
-      Text(label, style: _body(size: 9, color: c)),
+      Icon(icon, size: 11, color: c),
+      const SizedBox(width: 5),
+      Text(label, style: _body(size: 10, color: Colors.white70)),
     ]),
   );
 }
@@ -326,16 +323,31 @@ class _WeatherScreenState extends State<WeatherScreen> {
   void initState() { super.initState(); _loadWeather(); }
 
   Future<void> _getLocationName(double lat, double lon) async {
+    // Nominatim (OpenStreetMap) reverse geocoding — returns reliable city names
     try {
-      final res = await http.get(Uri.parse(
-          "https://geocoding-api.open-meteo.com/v1/reverse?latitude=$lat&longitude=$lon&language=en"));
+      final res = await http.get(
+        Uri.parse('https://nominatim.openstreetmap.org/reverse?lat=$lat&lon=$lon&format=json&zoom=10'),
+        headers: {'User-Agent': 'PrecisSpray/1.0'},
+      );
       if (res.statusCode == 200) {
-        final d = jsonDecode(res.body);
-        setState(() {
-          locationName = "${d['city'] ?? d['locality'] ?? 'Unknown'}, ${d['principalSubdivision'] ?? ''}";
-        });
+        final d = jsonDecode(res.body) as Map<String, dynamic>;
+        final addr = d['address'] as Map<String, dynamic>?;
+        if (addr != null) {
+          final city = addr['city']
+              ?? addr['town']
+              ?? addr['village']
+              ?? addr['county']
+              ?? addr['state_district']
+              ?? addr['state']
+              ?? 'Unknown';
+          setState(() { locationName = city.toString(); });
+          return;
+        }
       }
     } catch (_) {}
+    setState(() {
+      locationName = "${lat.toStringAsFixed(1)}°N ${lon.toStringAsFixed(1)}°E";
+    });
   }
 
   Future<void> _loadWeather() async {
@@ -380,22 +392,20 @@ class _WeatherScreenState extends State<WeatherScreen> {
   Widget _topBar(BuildContext context) => Padding(
     padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
     child: Row(children: [
-      GestureDetector(onTap: () => Navigator.pop(context),
-        child: Container(width: 46, height: 46,
-          decoration: BoxDecoration(color: _C.glass, borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: _C.glassBorder)),
-          child: const Icon(Icons.arrow_back, color: Colors.white, size: 20))),
-      const SizedBox(width: 16),
-      Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text("Weather", style: _heading(size: 24)),
-        Text(locationName, style: _body(size: 12, color: _C.textMuted)),
-      ]),
-      const Spacer(),
-      GestureDetector(onTap: _loadWeather,
-        child: Container(width: 46, height: 46,
-          decoration: BoxDecoration(color: _C.glass, borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: _C.glassBorder)),
-          child: const Icon(Icons.refresh, color: Colors.white, size: 20))),
+      GestureDetector(
+        onTap: () => Navigator.pop(context),
+        child: const Icon(Icons.arrow_back, color: Colors.white, size: 22)),
+      const SizedBox(width: 12),
+      const Icon(Icons.location_on_outlined, color: Colors.white70, size: 16),
+      const SizedBox(width: 4),
+      Expanded(
+        child: Text(locationName,
+          style: _heading(size: 20),
+          overflow: TextOverflow.ellipsis),
+      ),
+      GestureDetector(
+        onTap: _loadWeather,
+        child: const Icon(Icons.refresh, color: Colors.white70, size: 22)),
     ]),
   );
 
@@ -412,71 +422,243 @@ class _WeatherScreenState extends State<WeatherScreen> {
 
   Widget _content() {
     final cur = weatherData!['current'];
+    final tempInt = (cur['temperature_2m'] as num).round();
+    final code    = (cur['weathercode'] != null)
+        ? (cur['weathercode'] as num).toInt() : 0;
+    final conditionText = _conditionText(code);
+
     return SingleChildScrollView(
-      padding: const EdgeInsets.fromLTRB(20, 24, 20, 40),
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 40),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        _glassCard(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text("Current Weather",
-              style: _body(size: 13, color: _C.textMuted).copyWith(letterSpacing: 1.2)),
-          const SizedBox(height: 12),
-          Text("${cur['temperature_2m']}°C", style: _mono(size: 52)),
-          const SizedBox(height: 16),
-          Row(children: [
-            _statChip(Icons.water_drop_outlined, "${cur['relative_humidity_2m']}%", _C.cyan),
-            const SizedBox(width: 12),
-            _statChip(Icons.air, "${cur['wind_speed_10m']} km/h", _C.orange),
-          ]),
-        ])),
-        const SizedBox(height: 24),
-        Text("Hourly Forecast", style: _heading(size: 18)),
-        const SizedBox(height: 12),
-        SizedBox(height: 160, child: ListView.builder(
-            scrollDirection: Axis.horizontal, itemCount: 12,
-            itemBuilder: (_, i) => _hourlyCard(i))),
+        // ── Hero temperature block (reference style) ──────────────
+        Text("$tempInt°",
+          style: GoogleFonts.spaceGrotesk(
+            fontSize: 96, fontWeight: FontWeight.w300,
+            color: Colors.white, height: 1.0,
+            letterSpacing: -2)),
+        const SizedBox(height: 4),
+        Text(conditionText,
+          style: _heading(size: 28, color: Colors.white)),
+        const SizedBox(height: 16),
+        Row(children: [
+          Icon(Icons.water_drop_outlined, size: 14, color: _C.cyan),
+          const SizedBox(width: 5),
+          Text("${cur['relative_humidity_2m']}%", style: _body(size: 14, color: Colors.white)),
+          const SizedBox(width: 20),
+          Icon(Icons.air, size: 14, color: _C.orange),
+          const SizedBox(width: 5),
+          Text("${cur['wind_speed_10m']} km/h", style: _body(size: 14, color: Colors.white)),
+        ]),
+        const SizedBox(height: 28),
+        // thin divider like reference
+        Divider(color: Colors.white.withOpacity(0.15), height: 1),
+        const SizedBox(height: 16),
+        // ── Hourly strip ──────────────────────────────────────────
+        _hourlyStrip(),
         const SizedBox(height: 24),
         _SprayWindowSection(windows: _sprayWindows, isLoading: false),
         const SizedBox(height: 24),
         Text("7-Day Forecast", style: _heading(size: 18)),
         const SizedBox(height: 12),
-        _glassCard(child: Column(children: List.generate(7, (i) => _dailyRow(i)))),
+        Column(children: List.generate(7, (i) => _dailyRow(i))),
       ]),
     );
   }
 
-  Widget _hourlyCard(int i) {
+  // Maps WMO code to a human-readable condition string
+  String _conditionText(int code) {
+    if (code == 0)                return 'Clear';
+    if (code == 1)                return 'Mostly Clear';
+    if (code == 2)                return 'Partly Cloudy';
+    if (code == 3)                return 'Overcast';
+    if (code >= 45 && code <= 48) return 'Foggy';
+    if (code >= 51 && code <= 55) return 'Drizzle';
+    if (code >= 61 && code <= 65) return 'Rainy';
+    if (code >= 71 && code <= 77) return 'Snowy';
+    if (code >= 80 && code <= 82) return 'Showers';
+    if (code >= 95 && code <= 99) return 'Thunderstorm';
+    return 'Clear';
+  }
+
+  // Maps WMO weather code + hour to an appropriate emoji icon
+  String _weatherIcon(int code, int hour) {
+    final isNight = hour < 6 || hour >= 20;
+    if (code == 0)                     return isNight ? '🌙' : '☀️';   // clear
+    if (code == 1)                     return isNight ? '🌙' : '🌤️';  // mainly clear
+    if (code == 2)                     return '⛅';                     // partly cloudy
+    if (code == 3)                     return '☁️';                    // overcast
+    if (code >= 45 && code <= 48)      return '🌫️';                   // fog
+    if (code >= 51 && code <= 55)      return '🌦️';                   // drizzle
+    if (code >= 61 && code <= 65)      return '🌧️';                   // rain
+    if (code >= 71 && code <= 77)      return '❄️';                    // snow
+    if (code >= 80 && code <= 82)      return '🌦️';                   // showers
+    if (code >= 95 && code <= 99)      return '⛈️';                    // thunderstorm
+    return isNight ? '🌙' : '🌤️';
+  }
+
+  Widget _hourlyStrip() {
     final hourly = weatherData!['hourly'];
-    final time = DateFormat('h a').format(DateTime.parse(hourly['time'][i]));
-    return Container(
-      width: 110, margin: const EdgeInsets.only(right: 12), padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(color: _C.glass, borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: _C.glassBorder)),
-      child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-        Text(time, style: _body(size: 12, color: _C.textMuted)), const SizedBox(height: 8),
-        Text("${hourly['temperature_2m'][i]}°", style: _mono(size: 22)), const SizedBox(height: 6),
-        Text("💧 ${hourly['relative_humidity_2m'][i]}%", style: _body(size: 11)),
-        Text("🌧 ${hourly['precipitation_probability'][i]}%", style: _body(size: 11)),
-      ]),
+    const int count = 24;
+    const double colW = 64.0;
+    const double stripH = 220.0;
+    const double curveAreaH = 60.0; // height of the temperature curve zone
+    const double rainRowH = 28.0;   // guaranteed gap below curve before rain row
+
+    // Extract temps for curve normalisation
+    final temps = List.generate(count, (i) => (hourly['temperature_2m'][i] as num).toDouble());
+    final minT = temps.reduce((a, b) => a < b ? a : b);
+    final maxT = temps.reduce((a, b) => a > b ? a : b);
+    final range = (maxT - minT).clamp(1.0, double.infinity);
+
+    return SizedBox(
+      height: stripH,
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: SizedBox(
+          width: colW * count,
+          child: Stack(
+            children: [
+              // Temperature curve — drawn across full width
+              Positioned(
+                top: 80, // below time + icon rows
+                left: 0,
+                right: 0,
+                height: curveAreaH,
+                child: CustomPaint(
+                  painter: _TempCurvePainter(
+                    temps: temps,
+                    minT: minT,
+                    range: range,
+                    colW: colW,
+                    color: _C.yellow,
+                  ),
+                ),
+              ),
+              // Per-column content
+              Row(
+                children: List.generate(count, (i) {
+                  final dt   = DateTime.parse(hourly['time'][i] as String);
+                  final time = DateFormat('h a').format(dt);
+                  final temp = temps[i];
+                  final rain = hourly['precipitation_probability'][i];
+                  final code = (hourly['weathercode'] != null)
+                      ? (hourly['weathercode'][i] as num).toInt() : 0;
+                  final icon = _weatherIcon(code, dt.hour);
+
+                  // dot Y position within curve area
+                  final frac = (temp - minT) / range;
+                  final dotY = curveAreaH - 6 - frac * (curveAreaH - 12);
+
+                  return SizedBox(
+                    width: colW,
+                    height: stripH,
+                    child: Stack(
+                      children: [
+                        Column(
+                          children: [
+                            const SizedBox(height: 8),
+                            // Time label
+                            SizedBox(
+                              height: 18,
+                              child: Text(time,
+                                style: _body(size: 11, color: _C.textMuted),
+                                textAlign: TextAlign.center),
+                            ),
+                            const SizedBox(height: 4),
+                            // Weather icon
+                            SizedBox(
+                              height: 26,
+                              child: Text(icon,
+                                style: const TextStyle(fontSize: 20),
+                                textAlign: TextAlign.center),
+                            ),
+                            // Spacer for curve area + guaranteed rain gap
+                            SizedBox(height: curveAreaH + rainRowH),
+                            // Rain row
+                            Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                              const Text('💧', style: TextStyle(fontSize: 9)),
+                              const SizedBox(width: 2),
+                              Text('$rain%', style: _body(size: 10, color: _C.cyan)),
+                            ]),
+                          ],
+                        ),
+                        // Temp label — floats above the dot
+                        Positioned(
+                          top: 80 + dotY - 20,
+                          left: 0,
+                          width: colW,
+                          child: Text('${temp.round()}°',
+                            style: _body(size: 11, color: Colors.white)
+                                .copyWith(fontWeight: FontWeight.w700),
+                            textAlign: TextAlign.center),
+                        ),
+                      ],
+                    ),
+                  );
+                }),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
   Widget _dailyRow(int i) {
     final daily = weatherData!['daily'];
-    final day = DateFormat('EEE').format(DateTime.parse(daily['time'][i]));
-    return Column(children: [
-      if (i > 0) Divider(color: _C.glassBorder, height: 1),
-      Padding(
-        padding: const EdgeInsets.symmetric(vertical: 12),
-        child: Row(children: [
-          SizedBox(width: 48, child: Text(day, style: _body(size: 14, color: Colors.white))),
-          const Spacer(),
-          Text("☔ ${daily['precipitation_probability_max'][i]}%", style: _body(size: 13, color: _C.cyan)),
-          const SizedBox(width: 16),
-          Text("${daily['temperature_2m_max'][i]}°", style: _body(size: 14, color: Colors.white)),
-          Text(" / ", style: _body(size: 14, color: _C.textMuted)),
-          Text("${daily['temperature_2m_min'][i]}°", style: _body(size: 14, color: _C.textMuted)),
+    final dt    = DateTime.parse(daily['time'][i] as String);
+    final now   = DateTime.now();
+    final isToday = dt.year == now.year && dt.month == now.month && dt.day == now.day;
+    final day   = isToday ? 'Today' : DateFormat('EEE').format(dt);
+    final rain  = daily['precipitation_probability_max'][i];
+    final maxT  = (daily['temperature_2m_max'][i] as num).round();
+    final minT  = (daily['temperature_2m_min'][i] as num).round();
+    // Use daily weathercode if available, else derive from rain probability
+    final code  = (daily['weathercode'] != null)
+        ? (daily['weathercode'][i] as num).toInt()
+        : (rain > 50 ? 61 : rain > 25 ? 80 : 1);
+    final dayIcon   = _weatherIcon(code, 10); // daytime icon
+    final nightIcon = _weatherIcon(code, 22); // nighttime icon
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 11),
+      child: Row(children: [
+        // Day name
+        SizedBox(
+          width: 52,
+          child: Text(day,
+            style: _body(size: 15, color: Colors.white)
+                .copyWith(fontWeight: FontWeight.w700)),
+        ),
+        // Rain probability
+        Row(children: [
+          const Text('💧', style: TextStyle(fontSize: 11)),
+          const SizedBox(width: 3),
+          Text('$rain%', style: _body(size: 12, color: _C.textMuted)),
         ]),
-      ),
-    ]);
+        const Spacer(),
+        // Day + night icons
+        Text(dayIcon,   style: const TextStyle(fontSize: 22)),
+        const SizedBox(width: 6),
+        Text(nightIcon, style: const TextStyle(fontSize: 18)),
+        const SizedBox(width: 14),
+        // Temperatures
+        SizedBox(
+          width: 38,
+          child: Text('$maxT°',
+            style: _body(size: 15, color: Colors.white)
+                .copyWith(fontWeight: FontWeight.w700),
+            textAlign: TextAlign.right),
+        ),
+        const SizedBox(width: 4),
+        SizedBox(
+          width: 34,
+          child: Text('$minT°',
+            style: _body(size: 15, color: _C.textMuted),
+            textAlign: TextAlign.right),
+        ),
+      ]),
+    );
   }
 
   Widget _statChip(IconData icon, String label, Color color) => Container(
@@ -487,17 +669,6 @@ class _WeatherScreenState extends State<WeatherScreen> {
       Icon(icon, size: 16, color: color), const SizedBox(width: 6),
       Text(label, style: _body(size: 13, color: color)),
     ]),
-  );
-
-  Widget _glassCard({required Widget child}) => Container(
-    width: double.infinity, padding: const EdgeInsets.all(20),
-    decoration: BoxDecoration(
-      gradient: const LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight,
-          colors: [Color(0x26FFFFFF), Color(0x14FFFFFF)]),
-      borderRadius: BorderRadius.circular(22),
-      border: Border.all(color: _C.glassBorder),
-    ),
-    child: child,
   );
 
   Widget _pillButton(String label, VoidCallback onTap) => GestureDetector(
@@ -521,4 +692,68 @@ class _WeatherScreenState extends State<WeatherScreen> {
           ),
         )),
       );
+}
+
+class _TempCurvePainter extends CustomPainter {
+  final List<double> temps;
+  final double minT;
+  final double range;
+  final double colW;
+  final Color color;
+
+  const _TempCurvePainter({
+    required this.temps,
+    required this.minT,
+    required this.range,
+    required this.colW,
+    required this.color,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final h = size.height;
+    final count = temps.length;
+
+    // Compute dot centres
+    List<Offset> pts = [];
+    for (int i = 0; i < count; i++) {
+      final frac = (temps[i] - minT) / range;
+      final x = colW * i + colW / 2;
+      final y = h - 6 - frac * (h - 12);
+      pts.add(Offset(x, y));
+    }
+
+    // Draw smooth curve using quadratic bezier segments
+    final linePaint = Paint()
+      ..color = color.withValues(alpha: 0.85)
+      ..strokeWidth = 2.0
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round;
+
+    if (pts.length >= 2) {
+      final path = Path()..moveTo(pts[0].dx, pts[0].dy);
+      for (int i = 0; i < pts.length - 1; i++) {
+        final mid = Offset((pts[i].dx + pts[i+1].dx) / 2, (pts[i].dy + pts[i+1].dy) / 2);
+        path.quadraticBezierTo(pts[i].dx, pts[i].dy, mid.dx, mid.dy);
+      }
+      path.lineTo(pts.last.dx, pts.last.dy);
+      canvas.drawPath(path, linePaint);
+    }
+
+    // Draw dots on each point
+    final dotPaint  = Paint()..color = color..style = PaintingStyle.fill;
+    final ringPaint = Paint()
+      ..color = color.withValues(alpha: 0.30)
+      ..style = PaintingStyle.fill;
+
+    for (final p in pts) {
+      canvas.drawCircle(p, 5.0, ringPaint);
+      canvas.drawCircle(p, 3.0, dotPaint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _TempCurvePainter old) =>
+      old.temps != temps || old.minT != minT;
 }
