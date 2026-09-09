@@ -10,7 +10,6 @@ import 'package:visibility_detector/visibility_detector.dart';
 import 'firebase_options.dart';
 import 'screens/weather_screen.dart';
 import 'screens/map_screen.dart';
-import 'screens/calculator_screen.dart';
 import 'screens/spray_report_screen.dart';
 import 'screens/networking_screen.dart';
 
@@ -543,82 +542,7 @@ class _DashboardScreenState extends State<DashboardScreen> with TickerProviderSt
 
             CustomScrollView(
               controller: _scrollCtrl,
-              slivers: [
-                SliverPadding(
-                  padding: EdgeInsets.fromLTRB(22, MediaQuery.of(context).padding.top + 90, 22, 0),
-                  sliver: SliverList(
-                    delegate: SliverChildListDelegate([
-                      GridView.count(
-                        crossAxisCount: 2,
-                        shrinkWrap: true,
-                        physics: const NeverScrollableScrollPhysics(),
-                        mainAxisSpacing: 14,
-                        crossAxisSpacing: 14,
-                        childAspectRatio: 0.75,
-                        children: [
-                          _ScrollReveal(
-                            index: 0,
-                            child: _FeatureCard(
-                              icon: Icons.map_outlined,
-                              color: AppColors.cyan,
-                              titleKey: 'feature1_title',
-                              bodyKey: 'feature1_body',
-                              previewChild: const _MapPreview(),
-                              onTap: (ctx) => Navigator.push(ctx, MaterialPageRoute(builder: (_) => const MapScreen())),
-                            ),
-                          ),
-                          _ScrollReveal(
-                            index: 1,
-                            child: _FeatureCard(
-                              icon: Icons.cloud_queue,
-                              color: AppColors.orange,
-                              titleKey: 'feature2_title',
-                              bodyKey: 'feature2_body',
-                              previewChild: const _WeatherPreview(),
-                              onTap: (ctx) => Navigator.push(ctx, MaterialPageRoute(builder: (_) => const WeatherScreen())),
-                            ),
-                          ),
-                          _ScrollReveal(
-                            index: 2,
-                            child: _FeatureCard(
-                              icon: Icons.science_outlined,
-                              color: AppColors.yellow,
-                              titleKey: 'feature3_title',
-                              bodyKey: 'feature3_body',
-                              previewChild: const _CalcPreview(),
-                              onTap: (ctx) => Navigator.push(ctx, MaterialPageRoute(builder: (_) => const CalculatorScreen())),
-                            ),
-                          ),
-                          _ScrollReveal(
-                            index: 3,
-                            child: _FeatureCard(
-                              icon: Icons.summarize_outlined,
-                              color: AppColors.green,
-                              titleKey: 'feature4_title',
-                              bodyKey: 'feature4_body',
-                              previewChild: const _ReportPreview(),
-                              onTap: (ctx) => Navigator.push(ctx, MaterialPageRoute(builder: (_) => const SprayReportScreen())),
-                            ),
-                          ),
-                          _ScrollReveal(
-                            index: 4,
-                            child: _FeatureCard(
-                              icon: Icons.handshake_outlined,
-                              color: AppColors.cyan,
-                              titleKey: 'feature5_title',
-                              bodyKey: 'feature5_body',
-                              previewChild: const _NetworkingPreview(),
-                              onTap: (ctx) => Navigator.push(ctx, MaterialPageRoute(builder: (_) => const NetworkingScreen())),
-                            ),
-                          ),
-                        ],
-                      ),
-
-                      const SizedBox(height: 50),
-                    ]),
-                  ),
-                ),
-              ],
+              slivers: const [],
             ),
 
             Positioned(
@@ -1578,7 +1502,7 @@ class _FeaturesScreenBody extends StatelessWidget {
                           children: [
                             _FeatureCard(
                               icon: Icons.map_outlined,
-                              color: AppColors.cyan,
+                              color: const Color(0xFF7EC87A), // light green
                               titleKey: 'feature1_title',
                               bodyKey: 'feature1_body',
                               previewChild: const _MapPreview(),
@@ -1587,7 +1511,7 @@ class _FeaturesScreenBody extends StatelessWidget {
                             ),
                             _FeatureCard(
                               icon: Icons.cloud_queue,
-                              color: AppColors.orange,
+                              color: const Color(0xFF7AC8E8), // sky blue
                               titleKey: 'feature2_title',
                               bodyKey: 'feature2_body',
                               previewChild: const _WeatherPreview(),
@@ -1595,17 +1519,8 @@ class _FeaturesScreenBody extends StatelessWidget {
                                   MaterialPageRoute(builder: (_) => const WeatherScreen())),
                             ),
                             _FeatureCard(
-                              icon: Icons.science_outlined,
-                              color: AppColors.yellow,
-                              titleKey: 'feature3_title',
-                              bodyKey: 'feature3_body',
-                              previewChild: const _CalcPreview(),
-                              onTap: (ctx) => Navigator.push(ctx,
-                                  MaterialPageRoute(builder: (_) => const CalculatorScreen())),
-                            ),
-                            _FeatureCard(
                               icon: Icons.summarize_outlined,
-                              color: AppColors.green,
+                              color: const Color(0xFFD4A843), // warm yellow report
                               titleKey: 'feature4_title',
                               bodyKey: 'feature4_body',
                               previewChild: const _ReportPreview(),
@@ -1613,8 +1528,8 @@ class _FeaturesScreenBody extends StatelessWidget {
                                   MaterialPageRoute(builder: (_) => const SprayReportScreen())),
                             ),
                             _FeatureCard(
-                              icon: Icons.handshake_outlined,
-                              color: AppColors.cyan,
+                              icon: Icons.hub_outlined,
+                              color: const Color(0xFF3A5FCD), // ultramarine blue
                               titleKey: 'feature5_title',
                               bodyKey: 'feature5_body',
                               previewChild: const _NetworkingPreview(),
@@ -2757,6 +2672,24 @@ class _FeatureCardState extends State<_FeatureCard> with SingleTickerProviderSta
   late final AnimationController _pulse;
   late final Animation<double> _pulseAnim;
 
+  // Derives a dark-tinted version of the accent for the card face
+  Color get _face {
+    final hsl = HSLColor.fromColor(widget.color);
+    return hsl.withLightness(0.12).withSaturation(0.45).toColor();
+  }
+
+  // Light shadow — slightly lighter than face, same hue
+  Color get _shadowLight {
+    final hsl = HSLColor.fromColor(widget.color);
+    return hsl.withLightness(0.22).withSaturation(0.35).toColor();
+  }
+
+  // Dark shadow — near-black with hue tint
+  Color get _shadowDark {
+    final hsl = HSLColor.fromColor(widget.color);
+    return hsl.withLightness(0.04).withSaturation(0.40).toColor();
+  }
+
   @override
   void initState() {
     super.initState();
@@ -2785,29 +2718,32 @@ class _FeatureCardState extends State<_FeatureCard> with SingleTickerProviderSta
         curve: Curves.easeOut,
         clipBehavior: Clip.antiAlias,
         decoration: BoxDecoration(
-          color: AppColors.neumoFace,
+          color: _face,
           borderRadius: BorderRadius.circular(22),
+          border: Border(
+            top: BorderSide(color: widget.color.withOpacity(0.75), width: 2.5),
+          ),
           boxShadow: _pressed
               ? [
                   BoxShadow(
-                    color: AppColors.neumoDark.withOpacity(0.9),
+                    color: _shadowDark.withOpacity(0.9),
                     offset: const Offset(4, 4),
                     blurRadius: 10,
                   ),
                   BoxShadow(
-                    color: AppColors.neumoLight.withOpacity(0.25),
+                    color: _shadowLight.withOpacity(0.30),
                     offset: const Offset(-2, -2),
                     blurRadius: 6,
                   ),
                 ]
               : [
                   BoxShadow(
-                    color: AppColors.neumoDark.withOpacity(0.85),
+                    color: _shadowDark.withOpacity(0.85),
                     offset: const Offset(6, 6),
                     blurRadius: 16,
                   ),
                   BoxShadow(
-                    color: AppColors.neumoLight.withOpacity(0.35),
+                    color: _shadowLight.withOpacity(0.40),
                     offset: const Offset(-5, -5),
                     blurRadius: 14,
                   ),
@@ -2827,8 +2763,8 @@ class _FeatureCardState extends State<_FeatureCard> with SingleTickerProviderSta
                           begin: Alignment.topCenter,
                           end: Alignment.bottomCenter,
                           colors: [
-                            widget.color.withOpacity(0.07),
-                            Colors.transparent,
+                            widget.color.withOpacity(0.55),
+                            widget.color.withOpacity(0.15),
                           ],
                         ),
                       ),
@@ -2846,7 +2782,7 @@ class _FeatureCardState extends State<_FeatureCard> with SingleTickerProviderSta
                     Container(
               padding: const EdgeInsets.fromLTRB(14, 10, 14, 14),
               decoration: BoxDecoration(
-                color: AppColors.neumoDark.withOpacity(0.5),
+                color: _shadowDark.withOpacity(0.60),
                 border: Border(
                   top: BorderSide(color: widget.color.withOpacity(0.18)),
                 ),
@@ -2860,16 +2796,16 @@ class _FeatureCardState extends State<_FeatureCard> with SingleTickerProviderSta
                       width: 34,
                       height: 34,
                       decoration: BoxDecoration(
-                        color: AppColors.neumoFace,
+                        color: _face,
                         borderRadius: BorderRadius.circular(10),
                         boxShadow: [
                           BoxShadow(
-                            color: AppColors.neumoDark.withOpacity(0.7),
+                            color: _shadowDark.withOpacity(0.7),
                             offset: const Offset(2, 2),
                             blurRadius: 4 + _pulseAnim.value * 2,
                           ),
                           BoxShadow(
-                            color: AppColors.neumoLight.withOpacity(0.25 + _pulseAnim.value * 0.1),
+                            color: _shadowLight.withOpacity(0.25 + _pulseAnim.value * 0.1),
                             offset: const Offset(-2, -2),
                             blurRadius: 4 + _pulseAnim.value * 2,
                           ),
@@ -3088,79 +3024,6 @@ class _WeatherPreview extends StatelessWidget {
     );
   }
 }
-
-// â”€â”€ 3. Calculator Preview â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-class _CalcPreview extends StatelessWidget {
-  const _CalcPreview();
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text("Calculator", style: bodyFont(size: 10, color: AppColors.textMuted)),
-        const SizedBox(height: 6),
-        _miniResultBox("Pesticide Saved", "4.2 L", AppColors.green),
-        const SizedBox(height: 6),
-        _miniResultBox("Money Saved", "₹2,100", AppColors.yellow),
-        const SizedBox(height: 8),
-        // Mini bar chart
-        _miniBarChart(),
-        const SizedBox(height: 4),
-        Text("91.5% efficiency", style: bodyFont(size: 9, color: AppColors.cyan)),
-      ],
-    );
-  }
-
-  Widget _miniResultBox(String label, String value, Color color) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
-      decoration: BoxDecoration(
-        color: color.withOpacity(0.1),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: color.withOpacity(0.22)),
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text(label, style: bodyFont(size: 9, color: AppColors.textMuted)),
-          Text(value, style: monoFont(size: 11, color: color)),
-        ],
-      ),
-    );
-  }
-
-  Widget _miniBarChart() {
-    final vals = [0.4, 0.7, 0.55, 0.9, 0.65, 0.82];
-    final colors = [AppColors.orange, AppColors.orange, AppColors.yellow,
-                    AppColors.green, AppColors.green, AppColors.green];
-    return SizedBox(
-      height: 28,
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: List.generate(vals.length, (i) {
-          return Expanded(
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 1.5),
-              child: FractionallySizedBox(
-                heightFactor: vals[i],
-                alignment: Alignment.bottomCenter,
-                child: Container(
-                  decoration: BoxDecoration(
-                    color: colors[i].withOpacity(0.7),
-                    borderRadius: BorderRadius.circular(3),
-                  ),
-                ),
-              ),
-            ),
-          );
-        }),
-      ),
-    );
-  }
-}
-
-// â”€â”€ 4. Report Preview â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 class _ReportPreview extends StatelessWidget {
   const _ReportPreview();
 
@@ -3249,44 +3112,61 @@ class _NetworkingPreview extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text("Nearby Farmers", style: bodyFont(size: 10, color: AppColors.textMuted)),
-        const SizedBox(height: 6),
-        _farmerRow("Suresh Patil",  "Grapes · ₹55/kg",  AppColors.green),
-        const SizedBox(height: 5),
-        _farmerRow("Meena Devi",   "Onion · ₹18/kg",   AppColors.yellow),
-        const SizedBox(height: 5),
-        _farmerRow("Raju Yadav",   "Cotton · ₹62/kg",  AppColors.cyan),
-        const SizedBox(height: 8),
-        Row(children: [
-          _pill("Sell", AppColors.green),
-          const SizedBox(width: 6),
-          _pill("Buy",  AppColors.cyan),
-        ]),
-        const SizedBox(height: 4),
-        Text("6 farmers around you", style: bodyFont(size: 9, color: AppColors.textMuted)),
-      ],
+    // Network grid visualization — nodes connected by lines
+    return CustomPaint(
+      size: const Size(double.infinity, 90),
+      painter: _NetworkGridPainter(),
     );
   }
+}
 
-  Widget _farmerRow(String name, String info, Color color) => Row(children: [
-    Container(width: 5, height: 5, decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
-    const SizedBox(width: 6),
-    Expanded(child: Text(name, style: bodyFont(size: 10, color: Colors.white), overflow: TextOverflow.ellipsis)),
-    Text(info, style: bodyFont(size: 9, color: color), overflow: TextOverflow.ellipsis),
-  ]);
+// Network grid painter — draws nodes connected by lines suggesting connectivity
+class _NetworkGridPainter extends CustomPainter {
+  const _NetworkGridPainter();
 
-  Widget _pill(String label, Color color) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-    decoration: BoxDecoration(
-      color: color.withValues(alpha: 0.12),
-      borderRadius: BorderRadius.circular(6),
-      border: Border.all(color: color.withValues(alpha: 0.25)),
-    ),
-    child: Text(label, style: bodyFont(size: 9, color: color)),
-  );
+  static const _nodes = [
+    Offset(0.15, 0.20), Offset(0.45, 0.12), Offset(0.78, 0.22),
+    Offset(0.25, 0.60), Offset(0.55, 0.50), Offset(0.85, 0.65),
+    Offset(0.40, 0.88),
+  ];
+
+  static const _edges = [
+    [0, 1], [1, 2], [0, 3], [1, 4], [2, 5],
+    [3, 4], [4, 5], [3, 6], [4, 6],
+  ];
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final linePaint = Paint()
+      ..color = const Color(0xFF3A5FCD).withOpacity(0.45)
+      ..strokeWidth = 1.0
+      ..style = PaintingStyle.stroke;
+
+    final nodePaint = Paint()
+      ..color = const Color(0xFF6B8FE8)
+      ..style = PaintingStyle.fill;
+
+    final glowPaint = Paint()
+      ..color = const Color(0xFF3A5FCD).withOpacity(0.25)
+      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 4);
+
+    // draw edges
+    for (final e in _edges) {
+      final a = Offset(_nodes[e[0]].dx * size.width, _nodes[e[0]].dy * size.height);
+      final b = Offset(_nodes[e[1]].dx * size.width, _nodes[e[1]].dy * size.height);
+      canvas.drawLine(a, b, linePaint);
+    }
+
+    // draw nodes
+    for (final n in _nodes) {
+      final pos = Offset(n.dx * size.width, n.dy * size.height);
+      canvas.drawCircle(pos, 5.5, glowPaint);
+      canvas.drawCircle(pos, 3.5, nodePaint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter old) => false;
 }
 
 Widget _miniStat(String label, Color color) {
