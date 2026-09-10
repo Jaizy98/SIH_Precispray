@@ -11,6 +11,7 @@ import 'package:visibility_detector/visibility_detector.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
 import 'firebase_options.dart';
+import 'database_helper.dart';
 import 'screens/weather_screen.dart';
 import 'screens/map_screen.dart';
 import 'screens/spray_report_screen.dart';
@@ -19,7 +20,10 @@ import 'services/weather_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+  // Initialize SQLite database on startup
+  await LocalDatabaseHelper.instance.database;
+  // Start with an empty in-memory profile until user logs in
+  ProfileStore().save(name: '', age: '', crops: '', plotNames: [], plotAreas: []);
   runApp(const MyApp());
 }
 
@@ -307,6 +311,10 @@ const Map<String, String> kSupportedLanguages = {
 // ============================================================
 // 1. LOGIN PAGE (unchanged)
 // ============================================================
+
+// ============================================================
+// 1. LOGIN PAGE
+// ============================================================
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
   @override
@@ -314,9 +322,10 @@ class LoginPage extends StatefulWidget {
 }
 
 class _LoginPageState extends State<LoginPage> {
-  final TextEditingController _phoneController    = TextEditingController();
+  final TextEditingController _phoneController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
   bool _loading = false;
+  bool _obscurePassword = true;
 
   @override
   void dispose() {
@@ -325,71 +334,162 @@ class _LoginPageState extends State<LoginPage> {
     super.dispose();
   }
 
-  Future<void> _handleAuth(BuildContext context) async {
+  Future<void> _login() async {
+    final phone    = _phoneController.text.trim();
+    final password = _passwordController.text.trim();
+    if (phone.isEmpty || password.isEmpty) {
+      _showMessage('Please enter phone number and password.');
+      return;
+    }
     setState(() => _loading = true);
-    String email    = "${_phoneController.text.trim()}@precispray.com";
-    String password = _passwordController.text.trim();
     try {
-      try {
-        await FirebaseAuth.instance.createUserWithEmailAndPassword(email: email, password: password);
-      } catch (_) {
-        await FirebaseAuth.instance.signInWithEmailAndPassword(email: email, password: password);
+      final db   = LocalDatabaseHelper.instance;
+      final user = await db.verifyLocalLogin(phone, password);
+      if (!mounted) return;
+      if (user != null) {
+        final int userId = user['id'] as int;
+        UserSession().login(userId);
+        final savedProfile = await db.getProfile(userId);
+        final savedPlots   = await db.getPlots(userId);
+        if (savedProfile != null) {
+          ProfileStore().save(
+            name:      savedProfile['name']?.toString()  ?? '',
+            age:       savedProfile['age']?.toString()   ?? '',
+            crops:     savedProfile['crops']?.toString() ?? '',
+            plotNames: savedPlots.map((p) => p['plot_name']?.toString() ?? '').toList(),
+            plotAreas: savedPlots.map((p) => p['area']?.toString()      ?? '').toList(),
+          );
+        } else {
+          ProfileStore().save(name: '', age: '', crops: '', plotNames: [], plotAreas: []);
+        }
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (_) => const AnimationScreen()),
+        );
+      } else {
+        _showMessage('Invalid phone number or password.');
       }
-      if (!context.mounted) return;
-      Navigator.pushReplacement(context,
-          MaterialPageRoute(builder: (context) => const AnimationScreen()));
-    } catch (e) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Login failed: $e')));
-      }
+    } catch (_) {
+      if (mounted) _showMessage('Login failed. Please try again.');
     } finally {
       if (mounted) setState(() => _loading = false);
     }
   }
+
+  void _showMessage(String msg) =>
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+
+  InputDecoration _inputDecoration(String hint, IconData icon) => InputDecoration(
+    hintText: hint,
+    prefixIcon: Icon(icon),
+    filled: true,
+    fillColor: Colors.white.withOpacity(0.92),
+    border: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(14),
+      borderSide: BorderSide.none,
+    ),
+    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+  );
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       body: Container(
         decoration: const BoxDecoration(
-          image: DecorationImage(image: AssetImage('assets/login_bg.png'), fit: BoxFit.cover),
+          image: DecorationImage(
+            image: AssetImage('assets/login_bg.png'),
+            fit: BoxFit.cover,
+          ),
         ),
-        child: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Padding(
-                padding: const EdgeInsets.all(20),
-                child: TextField(
-                  controller: _phoneController,
-                  keyboardType: TextInputType.phone,
-                  decoration: const InputDecoration(
-                    hintText: "Contact Number",
-                    filled: true,
-                    fillColor: Colors.white70,
+        child: SafeArea(
+          child: Center(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(24),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 430),
+                child: Container(
+                  padding: const EdgeInsets.all(28),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withOpacity(0.45),
+                    borderRadius: BorderRadius.circular(28),
+                    border: Border.all(color: Colors.white.withOpacity(0.15)),
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        width: 76, height: 76,
+                        decoration: BoxDecoration(
+                          color: AppColors.green.withOpacity(0.15),
+                          shape: BoxShape.circle,
+                          border: Border.all(color: AppColors.green.withOpacity(0.5)),
+                        ),
+                        child: const Icon(Icons.agriculture, size: 40, color: AppColors.green),
+                      ),
+                      const SizedBox(height: 22),
+                      Text('Welcome Back', style: headingFont(size: 30, weight: FontWeight.w700)),
+                      const SizedBox(height: 8),
+                      Text('Login to continue to PreciSpray',
+                          textAlign: TextAlign.center,
+                          style: bodyFont(size: 14, color: AppColors.textMuted)),
+                      const SizedBox(height: 28),
+                      TextField(
+                        controller: _phoneController,
+                        keyboardType: TextInputType.phone,
+                        decoration: _inputDecoration('Contact Number', Icons.phone_outlined),
+                      ),
+                      const SizedBox(height: 14),
+                      TextField(
+                        controller: _passwordController,
+                        obscureText: _obscurePassword,
+                        decoration: _inputDecoration('Password', Icons.lock_outline).copyWith(
+                          suffixIcon: IconButton(
+                            icon: Icon(_obscurePassword
+                                ? Icons.visibility_off_outlined
+                                : Icons.visibility_outlined),
+                            onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 22),
+                      SizedBox(
+                        width: double.infinity, height: 52,
+                        child: ElevatedButton(
+                          onPressed: _loading ? null : _login,
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: AppColors.green,
+                            foregroundColor: AppColors.forestDeep,
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                          ),
+                          child: _loading
+                              ? const SizedBox(height: 22, width: 22,
+                                  child: CircularProgressIndicator(strokeWidth: 2))
+                              : const Text('LOGIN',
+                                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+                        ),
+                      ),
+                      const SizedBox(height: 20),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Text("Don't have an account? ",
+                              style: bodyFont(size: 13, color: AppColors.textMuted)),
+                          GestureDetector(
+                            onTap: _loading
+                                ? null
+                                : () => Navigator.push(context,
+                                    MaterialPageRoute(builder: (_) => const RegisterPage())),
+                            child: Text('Register',
+                                style: bodyFont(size: 13, weight: FontWeight.w700,
+                                    color: AppColors.green)),
+                          ),
+                        ],
+                      ),
+                    ],
                   ),
                 ),
               ),
-              Padding(
-                padding: const EdgeInsets.all(20),
-                child: TextField(
-                  controller: _passwordController,
-                  obscureText: true,
-                  decoration: const InputDecoration(
-                    hintText: "Password",
-                    filled: true,
-                    fillColor: Colors.white70,
-                  ),
-                ),
-              ),
-              _loading
-                  ? const CircularProgressIndicator()
-                  : ElevatedButton(
-                      onPressed: () => _handleAuth(context),
-                      child: const Text("Login / Register"),
-                    ),
-            ],
+            ),
           ),
         ),
       ),
@@ -397,9 +497,205 @@ class _LoginPageState extends State<LoginPage> {
   }
 }
 
+
 // ============================================================
-// 2. ANIMATION / TRANSITION SCREEN (unchanged)
+// 2. REGISTER PAGE
 // ============================================================
+class RegisterPage extends StatefulWidget {
+  const RegisterPage({super.key});
+  @override
+  State<RegisterPage> createState() => _RegisterPageState();
+}
+
+class _RegisterPageState extends State<RegisterPage> {
+  final TextEditingController _phoneController           = TextEditingController();
+  final TextEditingController _passwordController        = TextEditingController();
+  final TextEditingController _confirmPasswordController = TextEditingController();
+  bool _loading = false;
+  bool _obscurePassword = true;
+  bool _obscureConfirmPassword = true;
+
+  @override
+  void dispose() {
+    _phoneController.dispose();
+    _passwordController.dispose();
+    _confirmPasswordController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _register() async {
+    final phone           = _phoneController.text.trim();
+    final password        = _passwordController.text.trim();
+    final confirmPassword = _confirmPasswordController.text.trim();
+
+    if (phone.isEmpty || password.isEmpty || confirmPassword.isEmpty) {
+      _showMessage('Please fill in all fields.');
+      return;
+    }
+    if (phone.length < 10) {
+      _showMessage('Please enter a valid contact number.');
+      return;
+    }
+    if (password.length < 4) {
+      _showMessage('Password must be at least 4 characters.');
+      return;
+    }
+    if (password != confirmPassword) {
+      _showMessage('Passwords do not match.');
+      return;
+    }
+
+    setState(() => _loading = true);
+    try {
+      final userId = await LocalDatabaseHelper.instance.registerLocalUser(phone, password);
+      if (!mounted) return;
+      if (userId != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Account created successfully. Please login.')),
+        );
+        Navigator.pop(context);
+      } else {
+        _showMessage('An account with this phone number already exists.');
+      }
+    } catch (_) {
+      if (mounted) _showMessage('Registration failed. Please try again.');
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  void _showMessage(String msg) =>
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+
+  InputDecoration _inputDecoration(String hint, IconData icon) => InputDecoration(
+    hintText: hint,
+    prefixIcon: Icon(icon),
+    filled: true,
+    fillColor: Colors.white.withOpacity(0.92),
+    border: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(14),
+      borderSide: BorderSide.none,
+    ),
+    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+  );
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Container(
+        decoration: const BoxDecoration(
+          image: DecorationImage(
+            image: AssetImage('assets/login_bg.png'),
+            fit: BoxFit.cover,
+          ),
+        ),
+        child: SafeArea(
+          child: Center(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(24),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 430),
+                child: Container(
+                  padding: const EdgeInsets.all(28),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withOpacity(0.45),
+                    borderRadius: BorderRadius.circular(28),
+                    border: Border.all(color: Colors.white.withOpacity(0.15)),
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        width: 76, height: 76,
+                        decoration: BoxDecoration(
+                          color: AppColors.green.withOpacity(0.15),
+                          shape: BoxShape.circle,
+                          border: Border.all(color: AppColors.green.withOpacity(0.5)),
+                        ),
+                        child: const Icon(Icons.person_add_alt_1, size: 38, color: AppColors.green),
+                      ),
+                      const SizedBox(height: 22),
+                      Text('Create Account', style: headingFont(size: 30, weight: FontWeight.w700)),
+                      const SizedBox(height: 8),
+                      Text('Register to start using PreciSpray',
+                          textAlign: TextAlign.center,
+                          style: bodyFont(size: 14, color: AppColors.textMuted)),
+                      const SizedBox(height: 28),
+                      TextField(
+                        controller: _phoneController,
+                        keyboardType: TextInputType.phone,
+                        decoration: _inputDecoration('Contact Number', Icons.phone_outlined),
+                      ),
+                      const SizedBox(height: 14),
+                      TextField(
+                        controller: _passwordController,
+                        obscureText: _obscurePassword,
+                        decoration: _inputDecoration('Create Password', Icons.lock_outline).copyWith(
+                          suffixIcon: IconButton(
+                            icon: Icon(_obscurePassword
+                                ? Icons.visibility_off_outlined
+                                : Icons.visibility_outlined),
+                            onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+                      TextField(
+                        controller: _confirmPasswordController,
+                        obscureText: _obscureConfirmPassword,
+                        decoration: _inputDecoration('Confirm Password', Icons.lock_reset_outlined).copyWith(
+                          suffixIcon: IconButton(
+                            icon: Icon(_obscureConfirmPassword
+                                ? Icons.visibility_off_outlined
+                                : Icons.visibility_outlined),
+                            onPressed: () => setState(
+                                () => _obscureConfirmPassword = !_obscureConfirmPassword),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 22),
+                      SizedBox(
+                        width: double.infinity, height: 52,
+                        child: ElevatedButton(
+                          onPressed: _loading ? null : _register,
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: AppColors.green,
+                            foregroundColor: AppColors.forestDeep,
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                          ),
+                          child: _loading
+                              ? const SizedBox(height: 22, width: 22,
+                                  child: CircularProgressIndicator(strokeWidth: 2))
+                              : const Text('CREATE ACCOUNT',
+                                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+                        ),
+                      ),
+                      const SizedBox(height: 20),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Text('Already have an account? ',
+                              style: bodyFont(size: 13, color: AppColors.textMuted)),
+                          GestureDetector(
+                            onTap: _loading ? null : () => Navigator.pop(context),
+                            child: Text('Login',
+                                style: bodyFont(size: 13, weight: FontWeight.w700,
+                                    color: AppColors.green)),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class AnimationScreen extends StatefulWidget {
   const AnimationScreen({super.key});
   @override
@@ -1080,6 +1376,22 @@ class _DrawerAgriPainter extends CustomPainter {
 // PROFILE STORE â€” simple in-memory store for MVP.
 // Holds the last submitted profile so the drawer can display it.
 // ============================================================
+
+// ============================================================
+// CURRENT USER SESSION
+// Stores the unique SQLite user ID of the currently logged-in user.
+// ============================================================
+class UserSession {
+  static final UserSession _instance = UserSession._internal();
+  factory UserSession() => _instance;
+  UserSession._internal();
+
+  int? userId;
+  bool get isLoggedIn => userId != null;
+  void login(int id) => userId = id;
+  void logout() => userId = null;
+}
+
 class ProfileStore extends ChangeNotifier {
   static final ProfileStore _instance = ProfileStore._internal();
   factory ProfileStore() => _instance;
@@ -1163,25 +1475,53 @@ class _ProfileScreenState extends State<ProfileScreen> {
     });
   }
 
-  void _handleSubmit() {
+  Future<void> _handleSubmit() async {
     if (_nameController.text.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Please enter your name.')),
       );
       return;
     }
+
+    final name  = _nameController.text;
+    final age   = _ageController.text;
+    final crops = _cropsController.text;
+
+    final userId = UserSession().userId;
+    if (userId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Session expired. Please login again.')),
+      );
+      return;
+    }
+
+    final db = LocalDatabaseHelper.instance;
+    await db.saveProfile(userId, name, age, crops);
+    await db.clearAllPlots(userId);
+    for (final plot in _plots) {
+      final plotName = plot.nameController.text.trim();
+      final plotArea = plot.areaController.text.trim();
+      if (plotArea.isNotEmpty) {
+        await db.savePlot(userId, plotName, plotArea);
+      }
+    }
+
     ProfileStore().save(
-      name: _nameController.text,
-      age: _ageController.text,
-      crops: _cropsController.text,
+      name:      name,
+      age:       age,
+      crops:     crops,
       plotNames: _plots.map((p) => p.nameController.text).toList(),
       plotAreas: _plots.map((p) => p.areaController.text).toList(),
     );
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Profile saved!')),
-    );
-    Navigator.pop(context);
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Profile saved!')),
+      );
+      Navigator.pop(context);
+    }
   }
+
 
   @override
   void dispose() {

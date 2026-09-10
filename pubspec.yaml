@@ -32,6 +32,10 @@ dependencies:
   http: ^1.2.1
   intl: ^0.20.2
 
+  # Local SQLite database
+  sqflite: ^2.3.3+1
+  path: ^1.9.0
+
   # Mapping module
   uuid: ^4.4.0
 
