@@ -6,6 +6,7 @@ import 'package:video_player/video_player.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:visibility_detector/visibility_detector.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:http/http.dart' as http;
 import 'firebase_options.dart';
 import 'database_helper.dart';
 import 'screens/weather_screen.dart';
